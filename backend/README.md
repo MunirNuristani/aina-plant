@@ -70,6 +70,26 @@ import { prisma } from './db';
 const rows = await prisma.$queryRaw`SELECT 1`;
 ```
 
+### Seeding
+
+```bash
+npm run prisma:seed
+```
+
+Creates one test plant, one test device (assigned to that plant), and one
+sample sensor reading. Safe to run repeatedly — it upserts by fixed IDs /
+the device's unique identifier, so it won't create duplicates.
+
+The seeded device's credential is fixed and printed to the console every
+time you seed — it's for local testing only and is clearly labeled
+`DEVELOPMENT CREDENTIAL — DO NOT USE IN PRODUCTION`. Test it against a
+running server with the `curl` command the seed script prints, e.g.:
+
+```bash
+curl -X POST http://localhost:3000/devices/auth -H 'Content-Type: application/json' \
+  -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
+```
+
 ## Running the app
 
 ```bash
