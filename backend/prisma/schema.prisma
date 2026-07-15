@@ -24,7 +24,8 @@ model Plant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  devices Device[]
+  devices  Device[]
+  readings SensorReading[]
 }
 
 model Device {
@@ -41,5 +42,34 @@ model Device {
   plantId String?
   plant   Plant?  @relation(fields: [plantId], references: [id])
 
+  readings SensorReading[]
+
   @@index([plantId])
+}
+
+model SensorReading {
+  id String @id @default(uuid())
+
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id])
+
+  plantId String
+  plant   Plant  @relation(fields: [plantId], references: [id])
+
+  // When the device took the measurement, vs. when the server ingested it.
+  recordedAt DateTime
+  receivedAt DateTime @default(now())
+
+  // Uncalibrated sensor output, stored as reported — never transformed.
+  rawMoisture Int
+
+  // Calibrated reading; constrained to [0, 100] via a CHECK constraint added
+  // by hand to the migration (Prisma's schema DSL has no @@check support yet).
+  moisturePercent Float
+
+  firmwareVersion String?
+  wifiRssi        Int?
+
+  @@index([plantId, recordedAt])
+  @@index([deviceId])
 }
