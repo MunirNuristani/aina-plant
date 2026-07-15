@@ -1,0 +1,95 @@
+import { prisma } from '../db';
+import { Prisma, type Device } from '../generated/prisma/client';
+import { generateDeviceCredential } from '../lib/device-credential';
+import { ConflictError, NotFoundError } from '../http/errors';
+import type { CreateDeviceInput, UpdateDeviceConfigInput } from '../validation/device';
+
+const DEFAULT_REPORTING_INTERVAL_SECONDS = 900;
+
+export type PublicDevice = Omit<Device, 'credentialHash'>;
+
+function toPublicDevice(device: Device): PublicDevice {
+  const { credentialHash: _credentialHash, ...publicDevice } = device;
+  return publicDevice;
+}
+
+function isUniqueConstraintViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+export async function registerDevice(
+  input: CreateDeviceInput,
+): Promise<{ device: PublicDevice; credential: string }> {
+  const { secret, hash } = generateDeviceCredential();
+
+  try {
+    const device = await prisma.device.create({
+      data: {
+        name: input.name,
+        identifier: input.identifier,
+        firmwareVersion: input.firmwareVersion,
+        reportingIntervalSeconds:
+          input.reportingIntervalSeconds ?? DEFAULT_REPORTING_INTERVAL_SECONDS,
+        credentialHash: hash,
+      },
+    });
+
+    return { device: toPublicDevice(device), credential: secret };
+  } catch (error) {
+    if (isUniqueConstraintViolation(error)) {
+      throw new ConflictError(`Device identifier "${input.identifier}" is already registered`);
+    }
+    throw error;
+  }
+}
+
+export async function updateDeviceConfig(
+  deviceId: string,
+  input: UpdateDeviceConfigInput,
+): Promise<PublicDevice> {
+  const existing = await prisma.device.findUnique({ where: { id: deviceId } });
+  if (!existing) {
+    throw new NotFoundError('Device not found');
+  }
+
+  const device = await prisma.device.update({
+    where: { id: deviceId },
+    data: input,
+  });
+
+  return toPublicDevice(device);
+}
+
+export async function assignDeviceToPlant(
+  deviceId: string,
+  plantId: string,
+  reassign: boolean,
+): Promise<PublicDevice> {
+  const device = await prisma.device.findUnique({ where: { id: deviceId } });
+  if (!device) {
+    throw new NotFoundError('Device not found');
+  }
+
+  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  if (!plant) {
+    throw new NotFoundError('Plant not found');
+  }
+
+  if (!device.enabled) {
+    throw new ConflictError('Device is disabled and cannot be assigned to a plant');
+  }
+
+  if (device.plantId && device.plantId !== plantId && !reassign) {
+    throw new ConflictError(
+      'Device is already assigned to a different plant. Pass reassign: true to move it.',
+      { currentPlantId: device.plantId },
+    );
+  }
+
+  const updated = await prisma.device.update({
+    where: { id: deviceId },
+    data: { plantId },
+  });
+
+  return toPublicDevice(updated);
+}

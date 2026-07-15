@@ -11,3 +11,35 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+model Plant {
+  id             String   @id @default(uuid())
+  name           String   @db.VarChar(100)
+  commonName     String?
+  scientificName String?
+  location       String?
+  notes          String?
+  potSize        String?
+  soilType       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  devices Device[]
+}
+
+model Device {
+  id                       String    @id @default(uuid())
+  name                     String    @db.VarChar(100)
+  identifier               String    @unique
+  credentialHash           String
+  enabled                  Boolean   @default(true)
+  reportingIntervalSeconds Int       @default(900)
+  firmwareVersion          String?
+  lastSeenAt               DateTime?
+  createdAt                DateTime  @default(now())
+
+  plantId String?
+  plant   Plant?  @relation(fields: [plantId], references: [id])
+
+  @@index([plantId])
+}
