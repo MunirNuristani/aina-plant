@@ -11,6 +11,10 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:down:volumes": "docker compose down --volumes",
+    "db:logs": "docker compose logs -f postgres",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -20,12 +24,14 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.5",
