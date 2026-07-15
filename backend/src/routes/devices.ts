@@ -2,16 +2,28 @@ import { Router } from 'express';
 import {
   assignDeviceSchema,
   createDeviceSchema,
+  deviceAuthSchema,
   updateDeviceConfigSchema,
 } from '../validation/device';
 import {
   assignDeviceToPlant,
+  authenticateDevice,
   registerDevice,
   updateDeviceConfig,
 } from '../services/device-service';
 import { ValidationError } from '../http/errors';
 
 export const devicesRouter = Router();
+
+devicesRouter.post('/auth', async (req, res) => {
+  const parsed = deviceAuthSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new ValidationError('Invalid authentication payload', parsed.error.issues);
+  }
+
+  const device = await authenticateDevice(parsed.data.identifier, parsed.data.credential);
+  res.status(200).json({ device });
+});
 
 devicesRouter.post('/', async (req, res) => {
   const parsed = createDeviceSchema.safeParse(req.body);

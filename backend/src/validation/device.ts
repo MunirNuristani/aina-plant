@@ -38,3 +38,10 @@ export const assignDeviceSchema = z.object({
 });
 
 export type AssignDeviceInput = z.infer<typeof assignDeviceSchema>;
+
+export const deviceAuthSchema = z.object({
+  identifier: z.string().trim().min(1, 'identifier is required'),
+  credential: z.string().trim().min(1, 'credential is required'),
+});
+
+export type DeviceAuthInput = z.infer<typeof deviceAuthSchema>;

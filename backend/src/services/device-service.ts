@@ -1,7 +1,7 @@
 import { prisma } from '../db';
 import { Prisma, type Device } from '../generated/prisma/client';
-import { generateDeviceCredential } from '../lib/device-credential';
-import { ConflictError, NotFoundError } from '../http/errors';
+import { generateDeviceCredential, verifyDeviceCredential } from '../lib/device-credential';
+import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from '../http/errors';
 import type { CreateDeviceInput, UpdateDeviceConfigInput } from '../validation/device';
 
 const DEFAULT_REPORTING_INTERVAL_SECONDS = 900;
@@ -92,4 +92,21 @@ export async function assignDeviceToPlant(
   });
 
   return toPublicDevice(updated);
+}
+
+export async function authenticateDevice(
+  identifier: string,
+  credential: string,
+): Promise<PublicDevice> {
+  const device = await prisma.device.findUnique({ where: { identifier } });
+
+  if (!device || !verifyDeviceCredential(credential, device.credentialHash)) {
+    throw new UnauthorizedError('Invalid device identifier or credential');
+  }
+
+  if (!device.enabled) {
+    throw new ForbiddenError('Device is disabled');
+  }
+
+  return toPublicDevice(device);
 }
