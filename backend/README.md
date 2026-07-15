@@ -45,6 +45,31 @@ Tail the database logs:
 npm run db:logs
 ```
 
+## Prisma
+
+The app talks to Postgres through [Prisma](https://www.prisma.io/), using
+`DATABASE_URL` from your `.env` — no credentials are hardcoded anywhere in
+the schema or config.
+
+```bash
+npm run prisma:generate       # regenerate the client from prisma/schema.prisma
+npm run prisma:migrate        # create + apply a migration in development
+npm run prisma:migrate:deploy # apply pending migrations (CI / production)
+npm run prisma:studio         # browse the database in Prisma Studio
+```
+
+The client is regenerated automatically after `npm install` (via
+`postinstall`), and its output (`src/generated/prisma`) is gitignored — never
+commit it, just regenerate it.
+
+Import the shared client from `src/db`:
+
+```ts
+import { prisma } from './db';
+
+const rows = await prisma.$queryRaw`SELECT 1`;
+```
+
 ## Running the app
 
 ```bash

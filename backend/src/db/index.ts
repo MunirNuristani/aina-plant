@@ -1,7 +1,7 @@
 import { config } from '../config';
-import { pool } from './pool';
+import { prisma } from './prisma';
 
-export { pool } from './pool';
+export { prisma } from './prisma';
 
 function maskConnectionString(connectionString: string): string {
   try {
@@ -19,20 +19,27 @@ function describeError(error: unknown): string {
   if (error instanceof AggregateError) {
     return error.errors.map(describeError).join('; ');
   }
+
   if (error instanceof Error) {
-    return error.message || error.name;
+    const cleaned = error.message
+      .replace(/Invalid `prisma\.\$queryRaw\(\)` invocation:/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (cleaned) {
+      return cleaned;
+    }
+
+    const code = (error as { code?: string }).code;
+    return code ?? error.name;
   }
+
   return String(error);
 }
 
 export async function verifyDatabaseConnection(): Promise<void> {
   try {
-    const client = await pool.connect();
-    try {
-      await client.query('SELECT 1');
-    } finally {
-      client.release();
-    }
+    await prisma.$queryRaw`SELECT 1`;
   } catch (error) {
     const reason = describeError(error);
 
