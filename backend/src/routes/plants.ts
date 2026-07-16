@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { getLatestReadingForPlant, listReadingsForPlant } from '../services/reading-service';
-import { createPlant } from '../services/plant-service';
+import { createPlant, getPlantById, listPlants } from '../services/plant-service';
 import { listReadingsQuerySchema } from '../validation/reading-query';
 import { createPlantSchema } from '../validation/plant';
 import { toFieldErrors, ValidationError } from '../http/errors';
@@ -15,6 +15,16 @@ plantsRouter.post('/', async (req, res) => {
 
   const plant = await createPlant(parsed.data);
   res.status(201).json({ plant });
+});
+
+plantsRouter.get('/', async (_req, res) => {
+  const plants = await listPlants();
+  res.status(200).json({ plants });
+});
+
+plantsRouter.get('/:plantId', async (req, res) => {
+  const plant = await getPlantById(req.params.plantId);
+  res.status(200).json({ plant });
 });
 
 plantsRouter.get('/:plantId/readings/latest', async (req, res) => {

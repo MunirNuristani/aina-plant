@@ -156,6 +156,173 @@ describe('POST /api/v1/plants', () => {
   });
 });
 
+describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
+  const createdPlantIds: string[] = [];
+  const createdDeviceIds: string[] = [];
+
+  afterEach(async () => {
+    if (createdDeviceIds.length > 0) {
+      await prisma.device.deleteMany({ where: { id: { in: createdDeviceIds } } });
+      createdDeviceIds.length = 0;
+    }
+    if (createdPlantIds.length > 0) {
+      await prisma.plant.deleteMany({ where: { id: { in: createdPlantIds } } });
+      createdPlantIds.length = 0;
+    }
+  });
+
+  async function createTestPlant(overrides: Partial<Record<string, unknown>> = {}) {
+    const plant = await prisma.plant.create({
+      data: { name: 'List/Detail Test Plant', ...overrides },
+    });
+    createdPlantIds.push(plant.id);
+    return plant;
+  }
+
+  async function createTestDevice(
+    plantIdForDevice: string,
+    overrides: Partial<Record<string, unknown>> = {},
+  ) {
+    const device = await prisma.device.create({
+      data: {
+        name: 'List/Detail Test Device',
+        identifier: `list-detail-test-device-${randomUUID()}`,
+        credentialHash: hashDeviceCredential('unused'),
+        enabled: true,
+        plantId: plantIdForDevice,
+        ...overrides,
+      },
+    });
+    createdDeviceIds.push(device.id);
+    return device;
+  }
+
+  describe('GET /api/v1/plants', () => {
+    it('returns a well-formed array response', async () => {
+      const res = await request(app).get('/api/v1/plants');
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.plants)).toBe(true);
+    });
+
+    it('lists a plant just created', async () => {
+      const plant = await createTestPlant({ name: 'Listed Plant' });
+
+      const res = await request(app).get('/api/v1/plants');
+
+      expect(res.status).toBe(200);
+      const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
+      expect(found).toBeDefined();
+      expect(found.name).toBe('Listed Plant');
+    });
+
+    it('includes an empty devices array for a plant with no device assigned', async () => {
+      const plant = await createTestPlant();
+
+      const res = await request(app).get('/api/v1/plants');
+
+      const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
+      expect(found.devices).toEqual([]);
+    });
+
+    it('includes an enabled device assigned to a plant', async () => {
+      const plant = await createTestPlant();
+      const device = await createTestDevice(plant.id);
+
+      const res = await request(app).get('/api/v1/plants');
+
+      const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
+      expect(found.devices).toHaveLength(1);
+      expect(found.devices[0]).toMatchObject({
+        id: device.id,
+        identifier: device.identifier,
+        enabled: true,
+      });
+      expect(found.devices[0].credentialHash).toBeUndefined();
+    });
+
+    it('excludes a disabled device from the devices array', async () => {
+      const plant = await createTestPlant();
+      await createTestDevice(plant.id, { enabled: false });
+
+      const res = await request(app).get('/api/v1/plants');
+
+      const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
+      expect(found.devices).toEqual([]);
+    });
+  });
+
+  describe('GET /api/v1/plants/:plantId', () => {
+    it('returns a single plant by id', async () => {
+      const plant = await createTestPlant({ name: 'Detail Plant', location: 'Balcony' });
+
+      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.plant).toMatchObject({
+        id: plant.id,
+        name: 'Detail Plant',
+        location: 'Balcony',
+      });
+    });
+
+    it('returns 404 for a nonexistent plant', async () => {
+      const res = await request(app).get(`/api/v1/plants/${randomUUID()}`);
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 404 for a malformed plant id', async () => {
+      const res = await request(app).get('/api/v1/plants/not-a-real-id');
+      expect(res.status).toBe(404);
+    });
+
+    it('includes an empty devices array when no device is assigned', async () => {
+      const plant = await createTestPlant();
+
+      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.plant.devices).toEqual([]);
+    });
+
+    it('includes an enabled device assigned to the plant', async () => {
+      const plant = await createTestPlant();
+      const device = await createTestDevice(plant.id);
+
+      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.plant.devices).toHaveLength(1);
+      expect(res.body.plant.devices[0]).toMatchObject({
+        id: device.id,
+        identifier: device.identifier,
+        enabled: true,
+      });
+      expect(res.body.plant.devices[0].credentialHash).toBeUndefined();
+    });
+
+    it('excludes a disabled device from the devices array', async () => {
+      const plant = await createTestPlant();
+      await createTestDevice(plant.id, { enabled: false });
+
+      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.plant.devices).toEqual([]);
+    });
+
+    it('includes only the enabled device when a plant has one enabled and one disabled device', async () => {
+      const plant = await createTestPlant();
+      const enabledDevice = await createTestDevice(plant.id, { enabled: true });
+      await createTestDevice(plant.id, { enabled: false });
+
+      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+
+      expect(res.body.plant.devices).toHaveLength(1);
+      expect(res.body.plant.devices[0].id).toBe(enabledDevice.id);
+    });
+  });
+});
+
 describe('GET /api/v1/plants/:plantId/readings/latest', () => {
   it('returns 404 for a nonexistent plant', async () => {
     const res = await request(app).get(`/api/v1/plants/${randomUUID()}/readings/latest`);
