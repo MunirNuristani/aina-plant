@@ -146,6 +146,51 @@ calibration endpoints and the midpoint, clamping beyond both ends, the
 inverted-calibration case, and that the raw value survives a failed
 conversion.
 
+## Wi-Fi service module
+
+`lib/WifiService/` connects the ESP32 to a Wi-Fi network using configured
+credentials, logs connection state, detects disconnection, and retries with
+a controlled delay — all **without ever blocking the main loop**. The old
+`aina_core.ino` sketch's `connectWifi()` blocked in a
+`while (WiFi.status() != WL_CONNECTED) { delay(500); ... }` loop; nothing in
+this module ever spins or `delay()`s waiting on the network.
+
+### Non-blocking design
+
+`WifiService::update()` must be called on every `loop()` iteration. It only
+ever reads `WiFi.status()` and `millis()` and returns immediately — it never
+blocks. It:
+
+- Logs once when the connection transitions to connected (with the IP), and
+  once when it transitions to disconnected.
+- While not connected (whether that's the first attempt still in progress,
+  or a reconnect after a drop), retries no more often than `retryDelayMs`
+  (default 5000ms, configurable via the constructor) — reusing
+  `lib/RetryTimer/`'s `shouldRetryNow()` for the same overflow-safe timing
+  logic already unit-tested in `test/test_retry_timer/`, rather than
+  reimplementing it here.
+
+### Credential redaction
+
+Credentials are passed into the constructor by the caller (`main.cpp`), not
+hardcoded in this module — mirrors `SoilMoistureSensor`'s pin-injection
+pattern. The password is never logged anywhere in this module. The SSID is
+masked before logging (`maskSsid()` in `WifiService.cpp`, keeps only the
+first/last character, e.g. `A********7`) so Serial output never reveals the
+full configured credentials.
+
+`main.cpp` holds `WIFI_SSID`/`WIFI_PASSWORD` as placeholder constants —
+replace them with real values before flashing, but never commit real
+credentials to this file (it's tracked in git).
+
+### Why no native tests
+
+`WifiService` depends on `WiFi.h`/`Arduino.h` (like `SoilMoistureSensor`),
+so it's excluded from the `native` PlatformIO environment (see
+`platformio.ini`'s `lib_ignore`) and can only be verified on real hardware.
+The one piece of non-trivial logic it relies on — the retry-delay timing —
+is factored into `RetryTimer`, which *is* natively unit-tested.
+
 ## Project layout
 
 ```
@@ -154,5 +199,8 @@ firmware/
   src/main.cpp                      Entry point (setup/loop) — demonstrates usage
   lib/SoilMoistureSensor/            Reads + filters the raw sensor value (needs Arduino/hardware)
   lib/MoistureCalibration/           Converts raw → percent (pure logic, natively testable)
+  lib/RetryTimer/                    Overflow-safe "should retry now" timing (pure logic, natively testable)
+  lib/WifiService/                   Non-blocking Wi-Fi connect/reconnect + redacted logging (needs Arduino/hardware)
   test/test_moisture_calibration/    Unit tests for MoistureCalibration (`pio test -e native`)
+  test/test_retry_timer/             Unit tests for RetryTimer (`pio test -e native`)
 ```

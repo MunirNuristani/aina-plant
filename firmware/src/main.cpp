@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "SoilMoistureSensor.h"
 #include "MoistureCalibration.h"
+#include "WifiService.h"
 
 // GPIO34: an ADC1-capable, input-only pin — ADC1 (unlike ADC2) stays usable
 // even once Wi-Fi is active, which matters once this firmware starts
@@ -33,12 +34,22 @@ constexpr MoistureCalibration soilCalibration{/* dryValue= */ 3000, /* wetValue=
 // networking behavior yet.
 constexpr unsigned long LOOP_DELAY_MS = 5000;
 
+// Placeholders — fill in with the real network's credentials before
+// flashing. Never commit real credentials here: this file is tracked in
+// git, and WifiService only ever logs a masked SSID / redacts the
+// password (see lib/WifiService/), but the plaintext values themselves are
+// still whatever ends up in this source file.
+constexpr const char* WIFI_SSID = "YOUR_SSID";
+constexpr const char* WIFI_PASSWORD = "YOUR_PASSWORD";
+
 SoilMoistureSensor soilSensor(SOIL_SENSOR_PIN, SOIL_SENSOR_SAMPLE_COUNT, SOIL_SENSOR_SAMPLE_DELAY_MS);
+WifiService wifiService(WIFI_SSID, WIFI_PASSWORD);
 
 void setup() {
   Serial.begin(115200);
   delay(500); // let the serial monitor attach before the first log line
   soilSensor.begin();
+  wifiService.begin();
 
   // Checked once up front so a misconfigured calibration is loud and
   // obvious at startup — convertToMoisturePercent() also re-checks this on
@@ -52,6 +63,10 @@ void setup() {
 }
 
 void loop() {
+  // Drives connect/reconnect/logging — never blocks, safe to call every
+  // iteration regardless of how long the rest of loop() takes.
+  wifiService.update();
+
   SoilMoistureSample sample = soilSensor.read();
 
   // The correct usage pattern: always check success before touching
