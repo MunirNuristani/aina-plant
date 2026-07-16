@@ -7,6 +7,8 @@ import type { SensorReadingInput } from '../validation/reading';
 export type IngestReadingResult = {
   readingId: string;
   status: 'created' | 'duplicate';
+  recordedAt: string;
+  receivedAt: string;
 };
 
 function touchLastSeen(deviceId: string): Promise<unknown> {
@@ -32,7 +34,12 @@ export async function ingestReading(
     }
 
     await touchLastSeen(device.id);
-    return { readingId: existing.id, status: 'duplicate' };
+    return {
+      readingId: existing.id,
+      status: 'duplicate',
+      recordedAt: existing.recordedAt.toISOString(),
+      receivedAt: existing.receivedAt.toISOString(),
+    };
   }
 
   try {
@@ -50,7 +57,12 @@ export async function ingestReading(
     });
 
     await touchLastSeen(device.id);
-    return { readingId: reading.id, status: 'created' };
+    return {
+      readingId: reading.id,
+      status: 'created',
+      recordedAt: reading.recordedAt.toISOString(),
+      receivedAt: reading.receivedAt.toISOString(),
+    };
   } catch (error) {
     if (isUniqueConstraintViolation(error)) {
       // Lost a race with a concurrent identical retry — treat as idempotent success.
@@ -58,7 +70,12 @@ export async function ingestReading(
         where: { id: input.readingId },
       });
       await touchLastSeen(device.id);
-      return { readingId: reading.id, status: 'duplicate' };
+      return {
+        readingId: reading.id,
+        status: 'duplicate',
+        recordedAt: reading.recordedAt.toISOString(),
+        receivedAt: reading.receivedAt.toISOString(),
+      };
     }
     throw error;
   }

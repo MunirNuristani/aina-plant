@@ -57,8 +57,10 @@ model SensorReading {
   plant   Plant  @relation(fields: [plantId], references: [id])
 
   // When the device took the measurement, vs. when the server ingested it.
-  recordedAt DateTime
-  receivedAt DateTime @default(now())
+  // Explicit timestamptz (not the Postgres default of timestamp-without-tz)
+  // so both are unambiguously UTC at the storage layer, not just by ORM convention.
+  recordedAt DateTime @db.Timestamptz(3)
+  receivedAt DateTime @default(now()) @db.Timestamptz(3)
 
   // Uncalibrated sensor output, stored as reported — never transformed.
   rawMoisture Int

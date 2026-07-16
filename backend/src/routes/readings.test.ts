@@ -65,7 +65,12 @@ describe('POST /api/v1/readings', () => {
     const res = await authed().send(payload);
 
     expect(res.status).toBe(201);
-    expect(res.body).toEqual({ readingId: payload.readingId, status: 'created' });
+    expect(res.body).toEqual({
+      readingId: payload.readingId,
+      status: 'created',
+      recordedAt: '2026-07-16T10:00:00.000Z',
+      receivedAt: res.body.receivedAt,
+    });
 
     const stored = await prisma.sensorReading.findUnique({ where: { id: payload.readingId } });
     expect(stored).not.toBeNull();
@@ -219,5 +224,85 @@ describe('POST /api/v1/readings', () => {
 
     const count = await prisma.sensorReading.count({ where: { id: payload.readingId } });
     expect(count).toBe(1);
+  });
+});
+
+describe('reading timestamps', () => {
+  it('preserves the device-recorded time exactly, in both the response and storage', async () => {
+    const recordedAt = '2026-01-01T00:00:00.123Z';
+    const payload = validPayload({ recordedAt });
+
+    const res = await authed().send(payload);
+    expect(res.status).toBe(201);
+    expect(res.body.recordedAt).toBe(recordedAt);
+
+    const stored = await prisma.sensorReading.findUniqueOrThrow({
+      where: { id: payload.readingId },
+    });
+    expect(stored.recordedAt.toISOString()).toBe(recordedAt);
+  });
+
+  it('generates receivedAt on the server, ignoring any client-supplied value', async () => {
+    const before = Date.now();
+    const payload = { ...validPayload(), receivedAt: '1999-01-01T00:00:00Z' };
+
+    const res = await authed().send(payload);
+    const after = Date.now();
+
+    expect(res.status).toBe(201);
+    const receivedAtMs = new Date(res.body.receivedAt).getTime();
+    expect(receivedAtMs).toBeGreaterThanOrEqual(before);
+    expect(receivedAtMs).toBeLessThanOrEqual(after);
+  });
+
+  it('returns both timestamps as UTC (Z-suffixed) strings', async () => {
+    const res = await authed().send(validPayload());
+    expect(res.status).toBe(201);
+    expect(res.body.recordedAt).toMatch(/Z$/);
+    expect(res.body.receivedAt).toMatch(/Z$/);
+  });
+
+  it('preserves chronological ordering of recordedAt regardless of submission order', async () => {
+    const oldest = validPayload({ recordedAt: '2026-01-01T00:00:00Z' });
+    const middle = validPayload({ recordedAt: '2026-01-02T00:00:00Z' });
+    const newest = validPayload({ recordedAt: '2026-01-03T00:00:00Z' });
+
+    // Submitted out of chronological order on purpose.
+    await authed().send(newest);
+    await authed().send(oldest);
+    await authed().send(middle);
+
+    const ordered = await prisma.sensorReading.findMany({
+      where: { plantId },
+      orderBy: { recordedAt: 'asc' },
+    });
+
+    expect(ordered.map((r) => r.id)).toEqual([
+      oldest.readingId,
+      middle.readingId,
+      newest.readingId,
+    ]);
+  });
+
+  it('lets a buffered (delayed) reading be distinguished from a real-time one', async () => {
+    const realtime = validPayload({ recordedAt: new Date().toISOString() });
+    const buffered = validPayload({
+      recordedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 hours ago
+    });
+
+    await authed().send(realtime);
+    await authed().send(buffered);
+
+    const [realtimeRow, bufferedRow] = await Promise.all([
+      prisma.sensorReading.findUniqueOrThrow({ where: { id: realtime.readingId } }),
+      prisma.sensorReading.findUniqueOrThrow({ where: { id: buffered.readingId } }),
+    ]);
+
+    const realtimeGapMs = realtimeRow.receivedAt.getTime() - realtimeRow.recordedAt.getTime();
+    const bufferedGapMs = bufferedRow.receivedAt.getTime() - bufferedRow.recordedAt.getTime();
+
+    expect(realtimeGapMs).toBeLessThan(60 * 1000); // well under a minute
+    expect(bufferedGapMs).toBeGreaterThan(60 * 60 * 1000); // over an hour
+    expect(bufferedGapMs).toBeGreaterThan(realtimeGapMs);
   });
 });
