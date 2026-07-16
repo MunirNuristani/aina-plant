@@ -7,6 +7,7 @@
 #include "WifiService.h"
 #include "FirmwareReading.h"
 #include "ReadingSubmitter.h"
+#include "ReadingRetrier.h"
 
 // GPIO34: an ADC1-capable, input-only pin — ADC1 (unlike ADC2) stays usable
 // even once Wi-Fi is active, which matters once this firmware starts
@@ -86,6 +87,7 @@ constexpr time_t PLAUSIBLE_MIN_EPOCH = 1704067200;
 SoilMoistureSensor soilSensor(SOIL_SENSOR_PIN, SOIL_SENSOR_SAMPLE_COUNT, SOIL_SENSOR_SAMPLE_DELAY_MS);
 WifiService wifiService(WIFI_SSID, WIFI_PASSWORD);
 ReadingSubmitter readingSubmitter(API_URL, DEVICE_IDENTIFIER, DEVICE_KEY);
+ReadingRetrier readingRetrier(readingSubmitter);
 bool ntpSyncStarted = false;
 
 // Thin glue around the ESP32's hardware RNG (esp_random(), part of the
@@ -132,6 +134,17 @@ void loop() {
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     ntpSyncStarted = true;
     Serial.println("[main] NTP sync started");
+  }
+
+  // Drives any pending retry (non-blocking unless its controlled delay
+  // has actually elapsed — see ReadingRetrier::update()). While a
+  // previous reading is still retrying, this firmware doesn't capture a
+  // new one -- it tracks exactly one in-flight reading at a time, not a
+  // queue (see firmware/README.md's "Retry limitations" section).
+  readingRetrier.update();
+  if (readingRetrier.isPending()) {
+    delay(LOOP_DELAY_MS);
+    return;
   }
 
   SoilMoistureSample sample = soilSensor.read();
@@ -188,10 +201,14 @@ void loop() {
   Serial.print("[main] Reading JSON: ");
   Serial.println(json);
 
+  // Makes the first submission attempt immediately; if that fails with a
+  // retryable outcome, subsequent attempts happen via
+  // readingRetrier.update() on later loop() iterations above, reusing
+  // this exact same JSON (and therefore the same readingId) each time.
   // Response status/body logging happens inside submit() itself (see
-  // ReadingSubmitter.cpp) -- nothing further to do with the result here
-  // in this demo loop beyond letting it run to completion.
-  readingSubmitter.submit(json);
+  // ReadingSubmitter.cpp); attempt/give-up logging happens inside
+  // ReadingRetrier itself.
+  readingRetrier.beginSubmission(json);
 
   delay(LOOP_DELAY_MS);
 }

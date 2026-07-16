@@ -273,10 +273,11 @@ Response interpretation is split out into `lib/ReadingSubmitOutcome/` — a
 pure function, `classifySubmitResponse(httpStatusCode, responseBody)`, with
 no Arduino dependency, unit-tested on the host machine
 (`test/test_reading_submit_outcome/`) against every response shape the
-backend can actually return (201 created, 200 duplicate, 400/401/409
-errors, a network-level failure with no real response). `ReadingSubmitter`
-itself — the part that actually calls `HTTPClient` — is Arduino-dependent
-and can only be verified on real hardware, same reasoning as `WifiService`.
+backend can actually return (201 created, 200 duplicate,
+400/401/403/404/409/429/500-504 errors, a network-level failure with no
+real response). `ReadingSubmitter` itself — the part that actually calls
+`HTTPClient` — is Arduino-dependent and can only be verified on real
+hardware, same reasoning as `WifiService`.
 
 **Blocking, but bounded**: `HTTPClient::POST()` has no async variant on
 this platform, so `submit()` blocks for the duration of one HTTP request —
@@ -356,6 +357,95 @@ docker exec aina-plant-postgres psql -U user -d aina_plant \
 
 or via `npm run prisma:studio` for a browser UI.
 
+## Retry behavior
+
+`lib/ReadingRetrier/` sits on top of `ReadingSubmitter`, adding retry
+policy — mirroring how `WifiService` layers retry policy on top of raw
+`WiFi.begin()`/`status()` calls, reusing the same `lib/RetryTimer/` timing
+logic for the controlled delay between attempts. `main.cpp` calls
+`readingRetrier.beginSubmission(json)` once a reading's JSON is built
+(instead of calling `readingSubmitter.submit()` directly), and
+`readingRetrier.update()` every `loop()` iteration to drive any pending
+retry.
+
+### Classification: what gets retried
+
+Retryability is decided by `ReadingSubmitOutcome`'s `isRetryable` field
+(see `lib/ReadingSubmitOutcome/ReadingSubmitOutcome.h` for the exact
+rule):
+
+| Response                                          | Retryable? | Why                                                            |
+| -------------------------------------------------- | :--------: | ---------------------------------------------------------------- |
+| Network-level failure (`httpStatusCode <= 0`)       | ✅         | DNS/connection/timeout/no-Wi-Fi — nothing about the request itself was rejected |
+| `5xx` (server error)                                | ✅         | Backend/database trouble, presumed transient                    |
+| `429` (too many requests)                           | ✅         | Standard "retry later" code, even though this backend doesn't currently emit it |
+| `4xx` other than `429` (400/401/403/404/409)        | ❌         | The backend rejected this specific request — an identical retry fails identically every time |
+
+### Reusing the same reading ID
+
+`ReadingRetrier::beginSubmission()` copies the caller's JSON — including
+its `readingId` — into its own internal buffer, and every retry resends
+that exact same buffer, byte for byte. No new reading is ever captured, and
+no new `readingId` is ever generated, until the pending one resolves (see
+below). This is what lets the backend's idempotent-retry handling
+(`reading-service.ts`'s duplicate-`readingId` path) recognize a retry as
+the same reading, and it's what keeps a reading's `recordedAt` accurate to
+when it was actually measured even if it takes several attempts (and
+several seconds or more) to actually get stored — verified on real
+hardware: a reading that failed twice (connection refused) before
+succeeding on its third attempt, ~20 seconds later, landed in Postgres with
+its original `recordedAt` intact and a `receivedAt` ~20 seconds later,
+under the same `readingId` throughout.
+
+### Controlled delay, and giving up
+
+`ReadingRetrier`'s constructor takes `retryDelayMs` (default 10000) and
+`maxAttempts` (default 5, counting the first attempt). Between attempts,
+`update()` only acts once `RetryTimer::shouldRetryNow()` says the delay has
+elapsed — never a blocking wait. This is a **fixed controlled delay, not
+exponential backoff** — the same choice `WifiService` already makes for
+its own reconnect delay, for the same reason: simplicity, and readings
+happen on a slow (multi-second) cadence anyway, so aggressive backoff
+tuning isn't worth the added complexity here.
+
+A non-retryable failure gives up **immediately** (zero retries — verified
+on real hardware: a `deviceId` mismatch produced a `400`, logged
+"giving up immediately (no retry)," and a **fresh** reading was captured
+on the very next cycle rather than waiting out the retry delay). A
+retryable failure keeps retrying until it succeeds or `maxAttempts` is
+exhausted, whichever comes first — once exhausted, the reading is dropped
+and normal capture resumes on the next cycle.
+
+### Staying responsive
+
+`WifiService::update()` and the NTP-sync check both run every `loop()`
+iteration *before* `ReadingRetrier` is even consulted, so a pending retry
+never delays Wi-Fi reconnect logic. `ReadingRetrier::update()` itself is a
+cheap no-op unless a retry is both pending and due. The one thing that
+still blocks is an individual HTTP attempt itself (via `HTTPClient`,
+bounded by its 15-second timeout — see "Submitting readings to the
+backend" above) — retrying avoids blocking *between* attempts, not
+blocking *during* one.
+
+### Retry limitations
+
+- **One in-flight reading at a time, not a queue.** While a reading is
+  retrying, `main.cpp` skips capturing a new sensor reading entirely
+  (`readingRetrier.isPending()` gates it) rather than buffering multiple
+  pending readings. This keeps the implementation simple, at the cost of:
+  pausing fresh measurements for the duration of a retry sequence (up to
+  `maxAttempts × retryDelayMs`, ~50 seconds with the defaults).
+- **Bounded retries mean bounded data loss.** After `maxAttempts` total
+  attempts, a reading is dropped for good — there's no persistent buffer
+  or disk-backed queue that would let it survive a longer outage. This
+  firmware reduces data loss from *brief* network/server blips, not
+  arbitrarily long outages.
+- **No persistence across reboots.** Retry state (the pending JSON,
+  attempt count, timer) lives only in RAM. A reboot mid-retry loses that
+  one in-flight reading.
+- **Fixed delay, not backoff.** See above — a deliberate simplicity
+  tradeoff, not an oversight.
+
 ## Project layout
 
 ```
@@ -369,12 +459,13 @@ firmware/
   lib/UuidV4/                        UUID v4 formatting from given random bytes (pure logic, natively testable)
   lib/Iso8601/                       Epoch seconds → ISO 8601 UTC string (pure logic, natively testable)
   lib/FirmwareReading/               API-compatible reading struct + ArduinoJson serializer (pure logic, natively testable)
-  lib/ReadingSubmitOutcome/          Classifies an HTTP response into success/duplicate (pure logic, natively testable)
+  lib/ReadingSubmitOutcome/          Classifies an HTTP response into success/duplicate/retryable (pure logic, natively testable)
   lib/ReadingSubmitter/              POSTs a reading to the backend with device auth headers (needs Arduino/hardware)
+  lib/ReadingRetrier/                Retry policy (classify, controlled delay, same reading ID, bounded attempts) on top of ReadingSubmitter (needs Arduino/hardware)
   test/test_moisture_calibration/    Unit tests for MoistureCalibration (`pio test -e native`)
   test/test_retry_timer/             Unit tests for RetryTimer (`pio test -e native`)
   test/test_uuid_v4/                 Unit tests for UuidV4 (`pio test -e native`)
   test/test_iso8601/                 Unit tests for Iso8601 (`pio test -e native`)
   test/test_firmware_reading/        Unit tests for FirmwareReading (`pio test -e native`)
-  test/test_reading_submit_outcome/  Unit tests for ReadingSubmitOutcome (`pio test -e native`)
+  test/test_reading_submit_outcome/  Unit tests for ReadingSubmitOutcome, including retryability (`pio test -e native`)
 ```

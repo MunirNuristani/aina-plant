@@ -4,9 +4,11 @@
 #include <cstring>
 
 ReadingSubmitOutcome classifySubmitResponse(int httpStatusCode, const char* responseBody) {
-  ReadingSubmitOutcome outcome{false, false};
+  ReadingSubmitOutcome outcome{false, false, false};
 
   if (httpStatusCode != 200 && httpStatusCode != 201) {
+    outcome.isRetryable =
+        (httpStatusCode <= 0) || (httpStatusCode >= 500) || (httpStatusCode == 429);
     return outcome;
   }
   outcome.success = true;
