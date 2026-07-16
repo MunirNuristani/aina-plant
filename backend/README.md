@@ -2,20 +2,128 @@
 
 Express + TypeScript API for the aina-plant platform.
 
-## Prerequisites
+## Quickstart
+
+A complete, copy-pasteable walkthrough from a clean clone to submitting and
+retrieving a real sensor reading. Every command below was run start-to-finish
+against a freshly wiped database to confirm it actually works.
+
+### 1. Prerequisites
 
 - Node.js 20+
 - Docker (for the local PostgreSQL database)
 
-## Setup
+### 2. Install and configure
 
 ```bash
 npm install
 cp .env.example .env
 ```
 
-The defaults in `.env.example` already match the local database started by
-`docker-compose.yml`, so no edits are required to get running.
+`.env.example`'s defaults work out of the box — no edits needed. See
+"Environment variables" below for what each one does; none of them are
+real credentials.
+
+### 3. Start PostgreSQL
+
+```bash
+npm run db:up
+```
+
+Give it a few seconds to become healthy: `docker compose ps` should show
+`(healthy)` next to `aina-plant-postgres`.
+
+### 4. Run migrations
+
+```bash
+npm run prisma:migrate
+```
+
+Applies every migration in `prisma/migrations/` — the Docker volume starts
+completely empty, so all of them run.
+
+### 5. Seed sample data
+
+```bash
+npm run prisma:seed
+```
+
+Creates one plant, one device (assigned to that plant), and one sample
+reading, and prints a development-only device credential to the console.
+The walkthrough below uses the seed script's fixed values directly, so you
+don't need to copy anything from its output unless you changed them.
+
+### 6. Start the backend
+
+```bash
+npm run dev
+```
+
+Leave this running in its own terminal. It validates your `.env` and
+confirms the database connection before it starts listening — if either
+fails, it prints a clear error and exits instead of starting broken (see
+"Troubleshooting" below). If port `3000` is already in use by something
+else on your machine, run `PORT=3001 npm run dev` instead and adjust the
+port in the commands below to match.
+
+### 7. Submit a sample reading
+
+Authenticate as the seeded device to get its internal `id` (distinct from
+its `identifier`):
+
+```bash
+curl -X POST http://localhost:3000/devices/auth \
+  -H 'Content-Type: application/json' \
+  -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
+```
+
+The response looks like `{"device":{"id":"<uuid>","identifier":"dev-seed-device-001",...}}`
+— copy that `id`, then submit a reading with it:
+
+```bash
+DEVICE_ID=<paste the id from above>
+
+curl -X POST http://localhost:3000/api/v1/readings \
+  -H 'Content-Type: application/json' \
+  -H 'X-Device-Id: dev-seed-device-001' \
+  -H 'X-Device-Key: dev-only-seed-credential-do-not-use-in-production' \
+  -d "{\"readingId\":\"$(node -e 'console.log(require("crypto").randomUUID())')\",\"deviceId\":\"$DEVICE_ID\",\"recordedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%S.000Z)\",\"rawMoisture\":2048,\"moisturePercent\":45.5}"
+```
+
+A successful submission returns `201` with
+`{"readingId": "...", "status": "created", "recordedAt": "...", "receivedAt": "..."}`.
+
+### 8. Retrieve it back
+
+```bash
+curl http://localhost:3000/api/v1/plants/00000000-0000-0000-0000-000000000001/readings/latest
+```
+
+`00000000-0000-0000-0000-000000000001` is the seed plant's fixed ID. The
+response should be the reading you just submitted.
+
+If any step didn't work as described, see "Troubleshooting" near the
+bottom of this file.
+
+## Environment variables
+
+All read and validated at startup (`src/config/schema.ts`) — the app
+refuses to start if a required one is missing or malformed, with a clear
+error naming exactly which variable and why. Full details and generation
+tips are in `.env.example`.
+
+| Variable       | Required | Default       | Purpose                                                       |
+| -------------- | -------- | ------------- | ------------------------------------------------------------- |
+| `NODE_ENV`     | No       | `development` | `development` \| `test` \| `production`.                      |
+| `PORT`         | No       | `3000`        | HTTP port the server listens on.                              |
+| `DATABASE_URL` | Yes      | —             | Postgres connection string.                                   |
+| `JWT_SECRET`   | Yes      | —             | Signs/verifies JWTs; min. 32 characters.                      |
+| `AI_API_KEY`   | Yes      | —             | API key for the AI recommendation provider.                   |
+| `LOG_LEVEL`    | No       | `info`        | `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`. |
+
+None of these need to be real/production credentials for local development
+or for running the test suite — `.env.example`'s placeholder values (or any
+string satisfying the same format/length rules) work fine.
 
 ## Database
 
@@ -394,7 +502,35 @@ npm run db:down
 npx vitest run src/lib/device-credential.test.ts
 ```
 
-## Troubleshooting database connectivity
+## Troubleshooting
+
+**"Invalid environment configuration" at startup**
+The app validates every variable in `.env` before it will start (see
+"Environment variables" above) and names exactly which one is missing or
+malformed. Compare your `.env` against `.env.example` — most often this is
+a forgotten `cp .env.example .env`, or `JWT_SECRET` shorter than 32
+characters.
+
+**Port `3000` already in use (or the server seems to start but requests
+fail strangely)**
+Something else on your machine — another project, another instance of this
+one, even an unrelated Docker container — may already be bound to the
+port. Run `PORT=3001 npm run dev` (or any free port) instead, and use that
+port in place of `3000` in every command in "Quickstart" above.
+
+**Seeding fails with a "table does not exist" / Prisma error**
+Migrations haven't been applied yet. Run `npm run prisma:migrate` before
+`npm run prisma:seed` — a freshly created database (or one just wiped with
+`npm run db:down:volumes`) has no tables at all until migrations run.
+
+**`POST /api/v1/readings` returns 401/403 during the Quickstart walkthrough**
+Double check you're sending both `X-Device-Id: dev-seed-device-001` and
+`X-Device-Key: dev-only-seed-credential-do-not-use-in-production` exactly
+as printed by `npm run prisma:seed` — a 401 means the identifier or key
+didn't match, a 403 means the device exists but is disabled (shouldn't
+happen with a freshly seeded device; re-run the seed command to reset it).
+
+### Database connectivity
 
 **`ECONNREFUSED` / "Failed to connect to the database"**
 Postgres isn't running or isn't reachable yet. Run `npm run db:up`, then check
