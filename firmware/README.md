@@ -260,6 +260,102 @@ constant — fill it in with the real UUID returned by the backend's device
 registration endpoint (`POST /api/v1/devices`) once a device is
 registered.
 
+## Submitting readings to the backend
+
+`lib/ReadingSubmitter/` sends an already-serialized reading (from
+`serializeFirmwareReading()`) to the backend's `POST /api/v1/readings` over
+HTTP, with the `X-Device-Id` / `X-Device-Key` headers
+`backend/src/middleware/device-auth.ts` requires. `main.cpp` calls
+`readingSubmitter.submit(json)` once per reading, right after building and
+logging its JSON.
+
+Response interpretation is split out into `lib/ReadingSubmitOutcome/` — a
+pure function, `classifySubmitResponse(httpStatusCode, responseBody)`, with
+no Arduino dependency, unit-tested on the host machine
+(`test/test_reading_submit_outcome/`) against every response shape the
+backend can actually return (201 created, 200 duplicate, 400/401/409
+errors, a network-level failure with no real response). `ReadingSubmitter`
+itself — the part that actually calls `HTTPClient` — is Arduino-dependent
+and can only be verified on real hardware, same reasoning as `WifiService`.
+
+**Blocking, but bounded**: `HTTPClient::POST()` has no async variant on
+this platform, so `submit()` blocks for the duration of one HTTP request —
+bounded by a 15-second internal timeout, not indefinite. `submit()` also
+skips the request entirely (no attempt, no timeout wait) if Wi-Fi isn't
+currently connected.
+
+**Logging**: the HTTP status code and response body are logged — both are
+the backend's own response and contain nothing credential-bearing (see
+`backend/src/routes/readings.ts`'s response shapes). `deviceKey_` is never
+logged, mirroring `WifiService`'s "never log credentials" principle for
+the Wi-Fi password.
+
+**Plain HTTP, not HTTPS**: this targets the backend running on your local
+network during development, not a deployed production API. A production
+deployment would need an `https://` `API_URL` plus a
+`WiFiClientSecure`/certificate setup, which is out of scope here.
+
+### Local network address setup
+
+The ESP32 can't reach the backend at `localhost` — from the ESP32's point
+of view, `localhost` means the ESP32 itself. `main.cpp`'s `API_URL`
+constant must instead point at your development machine's **LAN IP
+address**, and both devices must be on the same network (e.g. the ESP32
+joined to the same Wi-Fi network your machine is on/near).
+
+1. Start the backend locally (see `backend/README.md`): `npm run db:up`,
+   then `npm run dev`. Note the port it logs (`backend/.env`'s `PORT`,
+   default `3000` — but see the note below if that port is already in use
+   by something else on your machine).
+2. Find your machine's LAN IP:
+   - macOS: `ipconfig getifaddr en0` (or `en1` if you're on Wi-Fi via a
+     different interface)
+   - Linux: `hostname -I | awk '{print $1}'`
+   - Windows: `ipconfig` and look for the Wi-Fi adapter's IPv4 address
+3. Set `main.cpp`'s `API_URL` to
+   `"http://<that IP>:<that port>/api/v1/readings"`, e.g.
+   `"http://192.168.1.93:3000/api/v1/readings"`.
+4. Make sure your machine's firewall allows inbound connections to that
+   port from your local network (macOS may prompt the first time; allow
+   it).
+
+If port 3000 is already in use by something else, run the backend on a
+different port instead of fighting the conflict: `PORT=3001 npm run dev`,
+and use that port in `API_URL` instead.
+
+### Testing against the seeded dev device
+
+`DEVICE_IDENTIFIER`/`DEVICE_KEY` in `main.cpp` default to
+`backend/prisma/seed.ts`'s fixture device (`dev-seed-device-001`) — a
+committed, intentionally-public dev-only credential, already assigned to a
+seed plant, so a freshly seeded local backend works out of the box. Only
+`API_URL` (see above) and `DEVICE_ID` need filling in:
+
+```bash
+# After seeding (npm run prisma:seed), look up the seed device's real
+# Device.id (a UUID) — this is what main.cpp's DEVICE_ID constant needs,
+# NOT the identifier string above (see "deviceId vs. the X-Device-Id
+# header" above for why they're different fields):
+curl -X POST http://localhost:3000/devices/auth \
+  -H 'Content-Type: application/json' \
+  -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
+```
+
+A real deployment must never use this seed credential — register a real
+device (`POST /api/v1/devices`) and use its generated credential instead.
+
+### Verifying storage in PostgreSQL
+
+Once a reading submission logs `HTTP 201` or `HTTP 200`, confirm it's
+actually in the database:
+
+```bash
+docker exec aina-plant-postgres psql -U user -d aina_plant \
+  -c 'SELECT id, "deviceId", "rawMoisture", "moisturePercent", "recordedAt" FROM "SensorReading" ORDER BY "receivedAt" DESC LIMIT 5;'
+```
+
+or via `npm run prisma:studio` for a browser UI.
+
 ## Project layout
 
 ```
@@ -273,9 +369,12 @@ firmware/
   lib/UuidV4/                        UUID v4 formatting from given random bytes (pure logic, natively testable)
   lib/Iso8601/                       Epoch seconds → ISO 8601 UTC string (pure logic, natively testable)
   lib/FirmwareReading/               API-compatible reading struct + ArduinoJson serializer (pure logic, natively testable)
+  lib/ReadingSubmitOutcome/          Classifies an HTTP response into success/duplicate (pure logic, natively testable)
+  lib/ReadingSubmitter/              POSTs a reading to the backend with device auth headers (needs Arduino/hardware)
   test/test_moisture_calibration/    Unit tests for MoistureCalibration (`pio test -e native`)
   test/test_retry_timer/             Unit tests for RetryTimer (`pio test -e native`)
   test/test_uuid_v4/                 Unit tests for UuidV4 (`pio test -e native`)
   test/test_iso8601/                 Unit tests for Iso8601 (`pio test -e native`)
   test/test_firmware_reading/        Unit tests for FirmwareReading (`pio test -e native`)
+  test/test_reading_submit_outcome/  Unit tests for ReadingSubmitOutcome (`pio test -e native`)
 ```
