@@ -90,6 +90,30 @@ curl -X POST http://localhost:3000/devices/auth -H 'Content-Type: application/js
   -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
 ```
 
+## Request IDs
+
+Every request gets a correlation ID via `requestIdMiddleware`
+(`src/middleware/request-id.ts`), the first middleware in the stack:
+
+- Reads `X-Request-Id` from the incoming request. If it's not a
+  well-formed UUID (wrong shape or length), a fresh one is generated
+  instead — a client can never inject an arbitrary or oversized value into
+  logs or responses.
+- Otherwise generates a new UUID.
+- Echoes it back on every response via the same `X-Request-Id` header.
+- Includes it in every JSON error body as `error.requestId` (400/401/403/404/409/500).
+
+The ID is also available to code that has no access to `req` at all — e.g.
+`device-service.ts`'s auth-rejection logging — via `getRequestId()`
+(`src/lib/request-context.ts`), backed by Node's `AsyncLocalStorage`. Use
+the shared `logger` (`src/lib/logger.ts`) instead of calling `console.*`
+directly anywhere in a request's code path, and the current request ID is
+prefixed onto the log line automatically.
+
+Two requests sharing the same ID (whether by client mistake or by design)
+never interfere with each other — `AsyncLocalStorage` scopes by the actual
+async call graph of each request, not by the ID value itself.
+
 ## Device authentication
 
 Routes that a device itself calls (e.g. reading ingestion, below) are
