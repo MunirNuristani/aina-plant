@@ -19,6 +19,14 @@ struct ReadingSubmitOutcome {
   // reports status == "duplicate" — i.e. this reading was already stored
   // from an earlier submission attempt, not newly created just now.
   bool isDuplicate;
+
+  // Meaningful only when success is false. True if this failure is worth
+  // retrying (a network-level failure or a transient 5xx server error) —
+  // false for a client error (4xx) that will fail identically on retry
+  // without a code or configuration change. See classifySubmitResponse()
+  // for the exact rule this follows, and lib/ReadingRetrier/ for what
+  // consumes it.
+  bool isRetryable;
 };
 
 // Classifies an HTTP response into a ReadingSubmitOutcome. `responseBody`
@@ -27,4 +35,21 @@ struct ReadingSubmitOutcome {
 // with no real HTTP response), which this function tolerates rather than
 // crashing: a success verdict is drawn from httpStatusCode alone, and a
 // bad/missing body just means isDuplicate falls back to false.
+//
+// Retryability rule (see backend/src/http/errors.ts for the status codes
+// this project's backend actually emits: 400/401/403/404/409, plus a
+// generic 500 for anything unhandled):
+//   - httpStatusCode <= 0 (network-level failure: DNS, connection
+//     refused, timeout, or the request was never attempted because Wi-Fi
+//     wasn't connected — see ReadingSubmitter) is always retryable:
+//     nothing about the request itself was rejected.
+//   - httpStatusCode >= 500 (server error — backend/database trouble, not
+//     a problem with this specific request) is retryable: presumed
+//     transient.
+//   - httpStatusCode == 429 (the standard "too many requests" code) is
+//     retryable, even though this backend doesn't currently emit it —
+//     retrying later is the textbook-correct response if it ever does.
+//   - Every other 4xx (400 validation, 401/403 auth, 404, 409 conflict)
+//     is NOT retryable: the backend rejected this specific request, and
+//     an identical retry will fail identically every time.
 ReadingSubmitOutcome classifySubmitResponse(int httpStatusCode, const char* responseBody);

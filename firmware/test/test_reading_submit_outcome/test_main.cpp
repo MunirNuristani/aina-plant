@@ -52,6 +52,64 @@ void test_not_connected_zero_code_is_failure() {
   TEST_ASSERT_FALSE(outcome.isDuplicate);
 }
 
+void test_network_failure_is_retryable() {
+  ReadingSubmitOutcome outcome = classifySubmitResponse(-1, "");
+  TEST_ASSERT_TRUE(outcome.isRetryable);
+}
+
+void test_not_connected_zero_code_is_retryable() {
+  ReadingSubmitOutcome outcome = classifySubmitResponse(0, nullptr);
+  TEST_ASSERT_TRUE(outcome.isRetryable);
+}
+
+void test_500_internal_error_is_retryable() {
+  ReadingSubmitOutcome outcome =
+      classifySubmitResponse(500, R"({"error":{"message":"Internal server error"}})");
+  TEST_ASSERT_FALSE(outcome.success);
+  TEST_ASSERT_TRUE(outcome.isRetryable);
+}
+
+void test_502_503_504_are_retryable() {
+  TEST_ASSERT_TRUE(classifySubmitResponse(502, "").isRetryable);
+  TEST_ASSERT_TRUE(classifySubmitResponse(503, "").isRetryable);
+  TEST_ASSERT_TRUE(classifySubmitResponse(504, "").isRetryable);
+}
+
+void test_429_too_many_requests_is_retryable() {
+  ReadingSubmitOutcome outcome = classifySubmitResponse(429, "");
+  TEST_ASSERT_FALSE(outcome.success);
+  TEST_ASSERT_TRUE(outcome.isRetryable);
+}
+
+void test_400_validation_error_is_not_retryable() {
+  ReadingSubmitOutcome outcome =
+      classifySubmitResponse(400, R"({"error":{"message":"Invalid sensor reading payload"}})");
+  TEST_ASSERT_FALSE(outcome.isRetryable);
+}
+
+void test_401_unauthorized_is_not_retryable() {
+  TEST_ASSERT_FALSE(classifySubmitResponse(401, "").isRetryable);
+}
+
+void test_403_forbidden_is_not_retryable() {
+  TEST_ASSERT_FALSE(classifySubmitResponse(403, "").isRetryable);
+}
+
+void test_404_not_found_is_not_retryable() {
+  TEST_ASSERT_FALSE(classifySubmitResponse(404, "").isRetryable);
+}
+
+void test_409_conflict_is_not_retryable() {
+  TEST_ASSERT_FALSE(classifySubmitResponse(409, "").isRetryable);
+}
+
+void test_success_responses_are_not_flagged_retryable() {
+  // isRetryable is meaningful only when success is false -- both success
+  // paths should leave it at its default (false), never true.
+  TEST_ASSERT_FALSE(classifySubmitResponse(201, R"({"status":"created"})").isRetryable);
+  TEST_ASSERT_FALSE(classifySubmitResponse(200, R"({"status":"duplicate"})").isRetryable);
+}
+
 void test_malformed_body_on_success_status_does_not_crash() {
   ReadingSubmitOutcome outcome = classifySubmitResponse(201, "not valid json");
   TEST_ASSERT_TRUE(outcome.success);   // status code alone is enough for success
@@ -75,5 +133,16 @@ int main(int argc, char** argv) {
   RUN_TEST(test_not_connected_zero_code_is_failure);
   RUN_TEST(test_malformed_body_on_success_status_does_not_crash);
   RUN_TEST(test_empty_body_on_success_status_does_not_crash);
+  RUN_TEST(test_network_failure_is_retryable);
+  RUN_TEST(test_not_connected_zero_code_is_retryable);
+  RUN_TEST(test_500_internal_error_is_retryable);
+  RUN_TEST(test_502_503_504_are_retryable);
+  RUN_TEST(test_429_too_many_requests_is_retryable);
+  RUN_TEST(test_400_validation_error_is_not_retryable);
+  RUN_TEST(test_401_unauthorized_is_not_retryable);
+  RUN_TEST(test_403_forbidden_is_not_retryable);
+  RUN_TEST(test_404_not_found_is_not_retryable);
+  RUN_TEST(test_409_conflict_is_not_retryable);
+  RUN_TEST(test_success_responses_are_not_flagged_retryable);
   return UNITY_END();
 }
