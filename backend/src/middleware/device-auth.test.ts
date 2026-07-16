@@ -4,6 +4,7 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
+import { logger } from '../lib/logger';
 import { AppError } from '../http/errors';
 import { deviceAuthMiddleware } from './device-auth';
 
@@ -105,10 +106,13 @@ describe('deviceAuthMiddleware', () => {
     expect(res.body.device.credentialHash).toBeUndefined();
   });
 
-  it('never logs the raw secret, on success or failure', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('never passes the raw secret to a log call, on success or failure', async () => {
+    // Checks call *arguments* — i.e. that the code never hands the secret
+    // to the logger in the first place. The logger's own redact config is
+    // a separate safety net, verified against real output in logger.test.ts.
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const infoSpy = vi.spyOn(logger, 'info');
+    const errorSpy = vi.spyOn(logger, 'error');
 
     await request(buildTestApp())
       .get('/protected')
@@ -120,15 +124,15 @@ describe('deviceAuthMiddleware', () => {
       .set('X-Device-Id', identifier)
       .set('X-Device-Key', SECRET);
 
-    const allLoggedArgs = [...warnSpy.mock.calls, ...logSpy.mock.calls, ...errorSpy.mock.calls]
+    const allLoggedArgs = [...warnSpy.mock.calls, ...infoSpy.mock.calls, ...errorSpy.mock.calls]
       .flat()
-      .map((arg) => String(arg));
+      .map((arg) => JSON.stringify(arg));
 
     expect(allLoggedArgs.some((line) => line.includes(SECRET))).toBe(false);
     expect(allLoggedArgs.some((line) => line.includes('wrong-secret'))).toBe(false);
 
     warnSpy.mockRestore();
-    logSpy.mockRestore();
+    infoSpy.mockRestore();
     errorSpy.mockRestore();
   });
 });

@@ -13,14 +13,7 @@ export const loggerOptions: LoggerOptions = {
   // Defense in depth: even if a future log call accidentally includes one
   // of these fields, the actual secret value never reaches output.
   redact: {
-    paths: [
-      'credential',
-      'credentialHash',
-      'key',
-      '*.credential',
-      '*.credentialHash',
-      '*.key',
-    ],
+    paths: ['credential', 'credentialHash', 'key', '*.credential', '*.credentialHash', '*.key'],
     censor: '[Redacted]',
   },
 

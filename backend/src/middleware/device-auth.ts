@@ -13,7 +13,7 @@ export async function deviceAuthMiddleware(
 
   // Never log `key` — only whether it was present.
   if (!identifier || !key) {
-    logger.warn('[device-auth] rejected: missing X-Device-Id or X-Device-Key header');
+    logger.warn('device auth rejected: missing X-Device-Id or X-Device-Key header');
     throw new UnauthorizedError('Missing X-Device-Id or X-Device-Key header');
   }
 
