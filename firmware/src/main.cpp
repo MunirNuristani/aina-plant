@@ -6,6 +6,7 @@
 #include "MoistureCalibration.h"
 #include "WifiService.h"
 #include "FirmwareReading.h"
+#include "ReadingSubmitter.h"
 
 // GPIO34: an ADC1-capable, input-only pin — ADC1 (unlike ADC2) stays usable
 // even once Wi-Fi is active, which matters once this firmware starts
@@ -54,6 +55,27 @@ constexpr const char* WIFI_PASSWORD = "YOUR_PASSWORD";
 constexpr const char* DEVICE_ID = "00000000-0000-0000-0000-000000000000";
 constexpr const char* FIRMWARE_VERSION = "1.0.0";
 
+// Where the backend's readings endpoint lives. Points at the machine
+// running the backend on your local network -- NOT "localhost", which
+// from the ESP32's point of view means the ESP32 itself, and NOT the
+// deployed production API (this module speaks plain HTTP, not HTTPS --
+// see ReadingSubmitter.h). See firmware/README.md's "Local network
+// address setup" section for how to find your machine's LAN IP and why
+// port 3000 (the backend's default -- see backend/.env.example) must be
+// reachable from the ESP32.
+constexpr const char* API_URL = "http://YOUR_LAN_IP:3000/api/v1/readings";
+
+// This device's auth credentials for the X-Device-Id / X-Device-Key
+// headers -- the *identifier* (a human-chosen string), not the DEVICE_ID
+// UUID above (see FirmwareReading.h's deviceId comment for why they
+// differ). These particular values match backend/prisma/seed.ts's
+// development fixture device -- convenient for local testing against a
+// freshly seeded backend, but still just a placeholder: a real deployment
+// needs its own registered device (POST /api/v1/devices) and its own
+// generated credential, never this one.
+constexpr const char* DEVICE_IDENTIFIER = "dev-seed-device-001";
+constexpr const char* DEVICE_KEY = "dev-only-seed-credential-do-not-use-in-production";
+
 // Anything before this means the ESP32's clock hasn't received NTP time
 // yet (it boots at epoch 0) — used to detect "not synced" rather than
 // reporting a bogus 1970 timestamp. 2024-01-01T00:00:00Z; arbitrary other
@@ -63,6 +85,7 @@ constexpr time_t PLAUSIBLE_MIN_EPOCH = 1704067200;
 
 SoilMoistureSensor soilSensor(SOIL_SENSOR_PIN, SOIL_SENSOR_SAMPLE_COUNT, SOIL_SENSOR_SAMPLE_DELAY_MS);
 WifiService wifiService(WIFI_SSID, WIFI_PASSWORD);
+ReadingSubmitter readingSubmitter(API_URL, DEVICE_IDENTIFIER, DEVICE_KEY);
 bool ntpSyncStarted = false;
 
 // Thin glue around the ESP32's hardware RNG (esp_random(), part of the
@@ -157,12 +180,18 @@ void loop() {
 
   char json[FIRMWARE_READING_JSON_BUFFER_SIZE];
   size_t len = serializeFirmwareReading(reading, json, sizeof(json));
-  if (len > 0) {
-    Serial.print("[main] Reading JSON: ");
-    Serial.println(json);
-  } else {
+  if (len == 0) {
     Serial.println("[main] Reading JSON serialization failed (buffer too small)");
+    delay(LOOP_DELAY_MS);
+    return;
   }
+  Serial.print("[main] Reading JSON: ");
+  Serial.println(json);
+
+  // Response status/body logging happens inside submit() itself (see
+  // ReadingSubmitter.cpp) -- nothing further to do with the result here
+  // in this demo loop beyond letting it run to completion.
+  readingSubmitter.submit(json);
 
   delay(LOOP_DELAY_MS);
 }
