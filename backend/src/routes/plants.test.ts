@@ -323,6 +323,181 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
   });
 });
 
+describe('POST /api/v1/plants/:plantId/device', () => {
+  const createdPlantIds: string[] = [];
+  const createdDeviceIds: string[] = [];
+  const createdReadingIds: string[] = [];
+
+  afterEach(async () => {
+    if (createdReadingIds.length > 0) {
+      await prisma.sensorReading.deleteMany({ where: { id: { in: createdReadingIds } } });
+      createdReadingIds.length = 0;
+    }
+    if (createdDeviceIds.length > 0) {
+      await prisma.device.deleteMany({ where: { id: { in: createdDeviceIds } } });
+      createdDeviceIds.length = 0;
+    }
+    if (createdPlantIds.length > 0) {
+      await prisma.plant.deleteMany({ where: { id: { in: createdPlantIds } } });
+      createdPlantIds.length = 0;
+    }
+  });
+
+  async function createTestPlant(overrides: Partial<Record<string, unknown>> = {}) {
+    const plant = await prisma.plant.create({
+      data: { name: 'Assignment Test Plant', ...overrides },
+    });
+    createdPlantIds.push(plant.id);
+    return plant;
+  }
+
+  async function createTestDevice(overrides: Partial<Record<string, unknown>> = {}) {
+    const device = await prisma.device.create({
+      data: {
+        name: 'Assignment Test Device',
+        identifier: `assignment-test-device-${randomUUID()}`,
+        credentialHash: hashDeviceCredential('unused'),
+        enabled: true,
+        ...overrides,
+      },
+    });
+    createdDeviceIds.push(device.id);
+    return device;
+  }
+
+  function assign(targetPlantId: string, body: unknown) {
+    return request(app).post(`/api/v1/plants/${targetPlantId}/device`).send(body);
+  }
+
+  it('assigns an enabled, unassigned device to a plant', async () => {
+    const plant = await createTestPlant();
+    const device = await createTestDevice();
+
+    const res = await assign(plant.id, { deviceId: device.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.device.id).toBe(device.id);
+    expect(res.body.device.plantId).toBe(plant.id);
+
+    const stored = await prisma.device.findUnique({ where: { id: device.id } });
+    expect(stored?.plantId).toBe(plant.id);
+  });
+
+  it('never returns credentialHash', async () => {
+    const plant = await createTestPlant();
+    const device = await createTestDevice();
+
+    const res = await assign(plant.id, { deviceId: device.id });
+    expect(res.body.device.credentialHash).toBeUndefined();
+  });
+
+  it('rejects assigning a disabled device', async () => {
+    const plant = await createTestPlant();
+    const device = await createTestDevice({ enabled: false });
+
+    const res = await assign(plant.id, { deviceId: device.id });
+
+    expect(res.status).toBe(409);
+
+    const stored = await prisma.device.findUnique({ where: { id: device.id } });
+    expect(stored?.plantId).toBeNull();
+  });
+
+  it('rejects moving an already-assigned device to a different plant without reassign', async () => {
+    const originalPlant = await createTestPlant({ name: 'Original Plant' });
+    const newPlant = await createTestPlant({ name: 'New Plant' });
+    const device = await createTestDevice({ plantId: originalPlant.id });
+
+    const res = await assign(newPlant.id, { deviceId: device.id });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.details).toMatchObject({ currentPlantId: originalPlant.id });
+
+    // The device must not have silently moved.
+    const stored = await prisma.device.findUnique({ where: { id: device.id } });
+    expect(stored?.plantId).toBe(originalPlant.id);
+  });
+
+  it('reassigns to a different plant when reassign is true, closing the previous assignment', async () => {
+    const originalPlant = await createTestPlant({ name: 'Original Plant' });
+    const newPlant = await createTestPlant({ name: 'New Plant' });
+    const device = await createTestDevice({ plantId: originalPlant.id });
+
+    const res = await assign(newPlant.id, { deviceId: device.id, reassign: true });
+
+    expect(res.status).toBe(200);
+    expect(res.body.device.plantId).toBe(newPlant.id);
+
+    // A device has exactly one current plantId -- the previous assignment
+    // is "closed" simply by no longer being that value.
+    const stored = await prisma.device.findUnique({ where: { id: device.id } });
+    expect(stored?.plantId).toBe(newPlant.id);
+    expect(stored?.plantId).not.toBe(originalPlant.id);
+  });
+
+  it('keeps historical readings tied to their original plant after reassignment', async () => {
+    const originalPlant = await createTestPlant({ name: 'Original Plant' });
+    const newPlant = await createTestPlant({ name: 'New Plant' });
+    const device = await createTestDevice({ plantId: originalPlant.id });
+
+    const reading = await prisma.sensorReading.create({
+      data: {
+        id: randomUUID(),
+        deviceId: device.id,
+        plantId: originalPlant.id,
+        recordedAt: new Date(),
+        rawMoisture: 2048,
+        moisturePercent: 45.5,
+      },
+    });
+    createdReadingIds.push(reading.id);
+
+    const res = await assign(newPlant.id, { deviceId: device.id, reassign: true });
+    expect(res.status).toBe(200);
+
+    const storedReading = await prisma.sensorReading.findUniqueOrThrow({
+      where: { id: reading.id },
+    });
+    expect(storedReading.plantId).toBe(originalPlant.id);
+    expect(storedReading.plantId).not.toBe(newPlant.id);
+  });
+
+  it('allows reassigning to the same plant it is already assigned to, without reassign', async () => {
+    const plant = await createTestPlant();
+    const device = await createTestDevice({ plantId: plant.id });
+
+    const res = await assign(plant.id, { deviceId: device.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.device.plantId).toBe(plant.id);
+  });
+
+  it('rejects a nonexistent plant id with 404', async () => {
+    const device = await createTestDevice();
+
+    const res = await assign(randomUUID(), { deviceId: device.id });
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects a nonexistent device id with 404', async () => {
+    const plant = await createTestPlant();
+
+    const res = await assign(plant.id, { deviceId: randomUUID() });
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects a missing deviceId with a standard-format field error', async () => {
+    const plant = await createTestPlant();
+
+    const res = await assign(plant.id, {});
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'deviceId' })]),
+    );
+  });
+});
+
 describe('GET /api/v1/plants/:plantId/readings/latest', () => {
   it('returns 404 for a nonexistent plant', async () => {
     const res = await request(app).get(`/api/v1/plants/${randomUUID()}/readings/latest`);
