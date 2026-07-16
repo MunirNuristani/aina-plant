@@ -14,9 +14,10 @@ cd firmware
 python3 -m venv .venv && source .venv/bin/activate  # first time only
 pip install platformio                              # first time only
 
-pio run                  # compile
+pio run                  # compile (esp32dev target)
 pio run --target upload  # flash to a connected ESP32
 pio device monitor       # view Serial output (115200 baud)
+pio test -e native        # run the unit tests (on your machine, no hardware needed)
 ```
 
 Once created, just `source .venv/bin/activate` in future sessions before
@@ -97,11 +98,61 @@ and the sensor's configuration at startup are all logged to `Serial` (see
 `SoilMoistureSensor::begin()` and `::read()`). Connect with
 `pio device monitor` at 115200 baud to see them.
 
+## Moisture calibration module
+
+`lib/MoistureCalibration/` converts a raw ADC reading (from
+`SoilMoistureSensor`) into a 0-100 moisture percentage, using a device's
+dry/wet calibration reference points. Unlike `SoilMoistureSensor`, it has
+**no Arduino dependency at all** — it's pure calculation logic, which is
+what makes it possible to unit-test on the host machine (`pio test -e
+native`) instead of only ever finding out it's correct once flashed to
+real hardware.
+
+**Calibration values are centralized** as one `MoistureCalibration{dryValue,
+wetValue}` struct, constructed once in `src/main.cpp`
+(`soilCalibration`) — the single place to change if the device is
+recalibrated. (A future ticket will sync these from the backend's
+`Calibration` API instead of a compile-time constant.)
+
+**Validation**: `MoistureCalibration::isValid()` requires both values to be
+within the ADC's real range (`0-4095`) and distinct from each other (equal
+values would divide by zero) — mirrors the backend's own calibration
+validation (`backend/src/validation/calibration.ts`). `main.cpp` checks
+this once at startup and logs a loud, hard-to-miss warning if it's
+invalid — but `convertToMoisturePercent()` also re-checks it on **every**
+call, so a bad calibration can never silently produce a meaningless
+percentage even if that startup warning goes unnoticed.
+
+**Conversion and clamping**: linear interpolation between the two
+calibration points, works whether `dryValue > wetValue` (the common case)
+or the reverse (some sensors/wirings read the other way). The result is
+always clamped to `[0, 100]`, since a raw reading can drift past its
+calibrated bounds (sensor aging, needs recalibrating) without that being
+allowed to produce a nonsensical percentage.
+
+**The raw value is always preserved** in the returned `MoistureReading`,
+even when conversion fails due to invalid calibration — `rawValue` is set
+regardless of `success`.
+
+Run the tests:
+
+```bash
+pio test -e native
+```
+
+`test/test_moisture_calibration/test_main.cpp` covers: valid/invalid
+calibration (equal values, out-of-range values), conversion at both
+calibration endpoints and the midpoint, clamping beyond both ends, the
+inverted-calibration case, and that the raw value survives a failed
+conversion.
+
 ## Project layout
 
 ```
 firmware/
-  platformio.ini              PlatformIO project + board configuration
-  src/main.cpp                 Entry point (setup/loop) — demonstrates usage
-  lib/SoilMoistureSensor/       The sensor module (this is the "dedicated module")
+  platformio.ini                    PlatformIO project + board/test environments
+  src/main.cpp                      Entry point (setup/loop) — demonstrates usage
+  lib/SoilMoistureSensor/            Reads + filters the raw sensor value (needs Arduino/hardware)
+  lib/MoistureCalibration/           Converts raw → percent (pure logic, natively testable)
+  test/test_moisture_calibration/    Unit tests for MoistureCalibration (`pio test -e native`)
 ```
