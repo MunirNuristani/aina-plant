@@ -50,6 +50,42 @@ void test_time_of_day_formatting() {
   TEST_ASSERT_EQUAL_STRING("2026-07-16T10:00:00Z", out);
 }
 
+void test_civil_date_time_matches_formatted_string() {
+  // Same reference value as test_time_of_day_formatting -- proves
+  // toCivilDateTime() and formatIso8601Utc() agree, since they share the
+  // same underlying calendar math.
+  CivilDateTime dt = toCivilDateTime(1784196000UL);
+  TEST_ASSERT_EQUAL(2026, dt.year);
+  TEST_ASSERT_EQUAL(7, dt.month);
+  TEST_ASSERT_EQUAL(16, dt.day);
+  TEST_ASSERT_EQUAL(10, dt.hour);
+  TEST_ASSERT_EQUAL(0, dt.minute);
+  TEST_ASSERT_EQUAL(0, dt.second);
+}
+
+void test_civil_date_time_epoch_zero() {
+  CivilDateTime dt = toCivilDateTime(0);
+  TEST_ASSERT_EQUAL(1970, dt.year);
+  TEST_ASSERT_EQUAL(1, dt.month);
+  TEST_ASSERT_EQUAL(1, dt.day);
+  TEST_ASSERT_EQUAL(0, dt.hour);
+  TEST_ASSERT_EQUAL(0, dt.minute);
+  TEST_ASSERT_EQUAL(0, dt.second);
+}
+
+void test_civil_date_time_nonzero_time_of_day() {
+  // 2026-01-01T00:00:00Z (1767225600, cross-validated against
+  // 2024-01-01T00:00:00Z=1704067200 via two years' elapsed days -- see
+  // FirmwareReading ticket history) plus 15:04:05 of that same day.
+  CivilDateTime dt = toCivilDateTime(1767225600UL + 15UL * 3600 + 4UL * 60 + 5UL);
+  TEST_ASSERT_EQUAL(2026, dt.year);
+  TEST_ASSERT_EQUAL(1, dt.month);
+  TEST_ASSERT_EQUAL(1, dt.day);
+  TEST_ASSERT_EQUAL(15, dt.hour);
+  TEST_ASSERT_EQUAL(4, dt.minute);
+  TEST_ASSERT_EQUAL(5, dt.second);
+}
+
 int main(int argc, char** argv) {
   UNITY_BEGIN();
   RUN_TEST(test_epoch_zero_is_1970_01_01);
@@ -59,5 +95,8 @@ int main(int argc, char** argv) {
   RUN_TEST(test_y2038_boundary_still_correct);
   RUN_TEST(test_max_uint32_epoch);
   RUN_TEST(test_time_of_day_formatting);
+  RUN_TEST(test_civil_date_time_matches_formatted_string);
+  RUN_TEST(test_civil_date_time_epoch_zero);
+  RUN_TEST(test_civil_date_time_nonzero_time_of_day);
   return UNITY_END();
 }

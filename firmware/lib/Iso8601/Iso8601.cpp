@@ -23,19 +23,20 @@ void civilFromDays(int64_t z, int& year, unsigned& month, unsigned& day) {
 
 }  // namespace
 
-void formatIso8601Utc(uint32_t epochSeconds, char* out) {
+CivilDateTime toCivilDateTime(uint32_t epochSeconds) {
   const int64_t days = static_cast<int64_t>(epochSeconds) / 86400;
   const uint32_t secondsOfDay = epochSeconds % 86400;
 
-  int year;
-  unsigned month;
-  unsigned day;
-  civilFromDays(days, year, month, day);
+  CivilDateTime result{};
+  civilFromDays(days, result.year, result.month, result.day);
+  result.hour = secondsOfDay / 3600;
+  result.minute = (secondsOfDay % 3600) / 60;
+  result.second = secondsOfDay % 60;
+  return result;
+}
 
-  const unsigned hour = secondsOfDay / 3600;
-  const unsigned minute = (secondsOfDay % 3600) / 60;
-  const unsigned second = secondsOfDay % 60;
-
-  std::snprintf(out, ISO8601_UTC_STRING_LENGTH + 1, "%04d-%02u-%02uT%02u:%02u:%02uZ", year, month,
-                day, hour, minute, second);
+void formatIso8601Utc(uint32_t epochSeconds, char* out) {
+  const CivilDateTime dt = toCivilDateTime(epochSeconds);
+  std::snprintf(out, ISO8601_UTC_STRING_LENGTH + 1, "%04d-%02u-%02uT%02u:%02u:%02uZ", dt.year,
+                dt.month, dt.day, dt.hour, dt.minute, dt.second);
 }

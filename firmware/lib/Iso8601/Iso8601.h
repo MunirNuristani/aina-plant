@@ -31,3 +31,26 @@ constexpr size_t ISO8601_UTC_STRING_LENGTH = 20;
 // 2106-02-07T06:28:15Z -- see test_y2038_boundary_still_correct and
 // test_max_uint32_epoch in test/test_iso8601/.
 void formatIso8601Utc(uint32_t epochSeconds, char* out);
+
+// The individual calendar/clock components of an epoch time -- for
+// callers that need year/month/day/hour/minute/second separately rather
+// than a pre-formatted ISO string (e.g. PlantDisplay's non-ISO date
+// format). Shares the exact same calendar math as formatIso8601Utc()
+// internally, so the two can never disagree with each other.
+struct CivilDateTime {
+  int year;
+  unsigned month;   // 1-12
+  unsigned day;     // 1-31 (day of month)
+  unsigned hour;    // 0-23
+  unsigned minute;  // 0-59
+  unsigned second;  // 0-59
+};
+
+// Breaks epochSeconds down into its calendar components. Like
+// formatIso8601Utc(), this always treats epochSeconds as a UTC value --
+// if a caller wants a *localized* date/time, it's their job to add a
+// timezone offset to epochSeconds before calling this (see
+// firmware/src/main.cpp's UTC_OFFSET_SECONDS for where this project does
+// that, and why it's a fixed manually-set offset rather than automatic
+// DST handling).
+CivilDateTime toCivilDateTime(uint32_t epochSeconds);

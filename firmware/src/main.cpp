@@ -8,6 +8,7 @@
 #include "FirmwareReading.h"
 #include "ReadingSubmitter.h"
 #include "ReadingRetrier.h"
+#include "PlantDisplay.h"
 
 // GPIO34: an ADC1-capable, input-only pin — ADC1 (unlike ADC2) stays usable
 // even once Wi-Fi is active, which matters once this firmware starts
@@ -84,11 +85,31 @@ constexpr const char* DEVICE_KEY = "dev-only-seed-credential-do-not-use-in-produ
 // epoch 0.
 constexpr time_t PLAUSIBLE_MIN_EPOCH = 1704067200;
 
+// Timezone offset for the LCD's displayed clock only -- never applied to
+// FirmwareReading's recordedAt, which must stay true UTC (see
+// FirmwareReading.h and the backend's z.iso.datetime() check). -25200 =
+// UTC-7 (Pacific Daylight Time). This is a *fixed* manual offset, not
+// automatic DST handling: Iso8601 deliberately does its own calendar math
+// instead of depending on libc's timezone database (see Iso8601.h), so
+// there's no TZ-string/DST-rule machinery to hook into here. Update this
+// constant by hand when DST changes (e.g. -28800 for PST in winter), or
+// change it entirely if the device is deployed somewhere else.
+constexpr int32_t UTC_OFFSET_SECONDS = -7 * 3600;
+
 SoilMoistureSensor soilSensor(SOIL_SENSOR_PIN, SOIL_SENSOR_SAMPLE_COUNT, SOIL_SENSOR_SAMPLE_DELAY_MS);
 WifiService wifiService(WIFI_SSID, WIFI_PASSWORD);
 ReadingSubmitter readingSubmitter(API_URL, DEVICE_IDENTIFIER, DEVICE_KEY);
 ReadingRetrier readingRetrier(readingSubmitter);
+PlantDisplay plantDisplay;
 bool ntpSyncStarted = false;
+
+// The LCD should keep showing the last *real* moisture reading across
+// cycles where a new one wasn't captured (sensor failure, a retry
+// pending, calibration invalid) rather than going blank or inventing a
+// value -- see PlantDisplay.h's "never fabricate" note. hasLastMoisture
+// stays false until the very first successful reading of this boot.
+bool hasLastMoisture = false;
+uint8_t lastMoisturePercent = 0;
 
 // Thin glue around the ESP32's hardware RNG (esp_random(), part of the
 // ESP-IDF, not a library worth wrapping any further) plus UuidV4's pure
@@ -109,6 +130,7 @@ void setup() {
   delay(500); // let the serial monitor attach before the first log line
   soilSensor.begin();
   wifiService.begin();
+  plantDisplay.begin();
 
   // Checked once up front so a misconfigured calibration is loud and
   // obvious at startup — convertToMoisturePercent() also re-checks this on
@@ -134,6 +156,25 @@ void loop() {
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
     ntpSyncStarted = true;
     Serial.println("[main] NTP sync started");
+  }
+
+  // Redrawn every iteration regardless of what happens below (a failed
+  // sensor read, a pending retry, ...) so the display always reflects
+  // current time/Wi-Fi status even on a cycle where no new moisture
+  // reading was captured -- it just keeps showing the last real one.
+  {
+    time_t nowForDisplay = time(nullptr);
+    PlantDisplay::Status displayStatus{};
+    displayStatus.hasTime = nowForDisplay >= PLAUSIBLE_MIN_EPOCH;
+    // The offset is only ever applied to what's shown on-screen -- see
+    // UTC_OFFSET_SECONDS's comment. nowForDisplay is always comfortably
+    // larger than the offset magnitude once hasTime is true, so this
+    // never underflows.
+    displayStatus.epochSeconds = static_cast<uint32_t>(nowForDisplay + UTC_OFFSET_SECONDS);
+    displayStatus.hasMoisture = hasLastMoisture;
+    displayStatus.moisturePercent = lastMoisturePercent;
+    displayStatus.wifiConnected = wifiService.isConnected();
+    plantDisplay.render(displayStatus);
   }
 
   // Drives any pending retry (non-blocking unless its controlled delay
@@ -173,6 +214,9 @@ void loop() {
 
   Serial.printf("Reading OK: rawMoisture=%d moisturePercent=%.1f\n", moisture.rawValue,
                 moisture.moisturePercent);
+
+  hasLastMoisture = true;
+  lastMoisturePercent = static_cast<uint8_t>(moisture.moisturePercent);
 
   time_t now = time(nullptr);
   if (now < PLAUSIBLE_MIN_EPOCH) {
