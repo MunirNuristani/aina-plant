@@ -14,8 +14,8 @@ const WIFI_RSSI_MAX = 0;
 const FIRMWARE_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+].+)?$/;
 
 export const sensorReadingSchema = z.object({
-  readingId: z.string().uuid('readingId must be a valid UUID'),
-  deviceId: z.string().uuid('deviceId must be a valid UUID'),
+  readingId: z.uuid('readingId must be a valid UUID'),
+  deviceId: z.uuid('deviceId must be a valid UUID'),
 
   // Must be UTC ("Z" suffix) so every reading is stored in one consistent format.
   recordedAt: z.iso.datetime({ message: 'recordedAt must be an ISO 8601 UTC timestamp' }),
