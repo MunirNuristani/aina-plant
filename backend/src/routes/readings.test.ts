@@ -161,7 +161,7 @@ describe('POST /api/v1/readings', () => {
     await prisma.device.deleteMany({ where: { id: unassignedDevice.id } });
   });
 
-  it('rejects a readingId already used by a different device', async () => {
+  it('rejects a readingId already used by a different device, without altering the original', async () => {
     const payload = validPayload();
     const firstRes = await authed().send(payload);
     expect(firstRes.status).toBe(201);
@@ -181,10 +181,43 @@ describe('POST /api/v1/readings', () => {
       .post('/api/v1/readings')
       .set('X-Device-Id', otherIdentifier)
       .set('X-Device-Key', SECRET)
-      .send(validPayload({ readingId: payload.readingId, deviceId: otherDevice.id }));
+      .send(
+        validPayload({
+          readingId: payload.readingId,
+          deviceId: otherDevice.id,
+          rawMoisture: 1,
+          moisturePercent: 1,
+        }),
+      );
 
     expect(res.status).toBe(409);
 
+    // The original record must be untouched by the rejected overwrite attempt.
+    const stored = await prisma.sensorReading.findUniqueOrThrow({
+      where: { id: payload.readingId },
+    });
+    expect(stored.deviceId).toBe(deviceId);
+    expect(stored.rawMoisture).toBe(payload.rawMoisture);
+    expect(stored.moisturePercent).toBe(payload.moisturePercent);
+
     await prisma.device.deleteMany({ where: { id: otherDevice.id } });
+  });
+
+  it('handles two concurrent submissions of the same readingId as one create and one duplicate', async () => {
+    const payload = validPayload();
+
+    const [first, second] = await Promise.all([authed().send(payload), authed().send(payload)]);
+
+    const statuses = [first.status, second.status].sort();
+    expect(statuses).toEqual([200, 201]);
+
+    const bodyStatuses = [first.body.status, second.body.status].sort();
+    expect(bodyStatuses).toEqual(['created', 'duplicate']);
+
+    expect(first.body.readingId).toBe(payload.readingId);
+    expect(second.body.readingId).toBe(payload.readingId);
+
+    const count = await prisma.sensorReading.count({ where: { id: payload.readingId } });
+    expect(count).toBe(1);
   });
 });
