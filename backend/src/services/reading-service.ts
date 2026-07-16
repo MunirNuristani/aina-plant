@@ -96,3 +96,38 @@ export async function getLatestReadingForPlant(plantId: string): Promise<SensorR
     orderBy: { recordedAt: 'desc' },
   });
 }
+
+export type ListReadingsOptions = {
+  start?: Date;
+  end?: Date;
+  sort: 'asc' | 'desc';
+  limit: number;
+};
+
+export async function listReadingsForPlant(
+  plantId: string,
+  options: ListReadingsOptions,
+): Promise<SensorReading[]> {
+  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  if (!plant) {
+    throw new NotFoundError('Plant not found');
+  }
+
+  const hasRange = options.start !== undefined || options.end !== undefined;
+
+  return prisma.sensorReading.findMany({
+    where: {
+      plantId,
+      ...(hasRange
+        ? {
+            recordedAt: {
+              ...(options.start !== undefined ? { gte: options.start } : {}),
+              ...(options.end !== undefined ? { lte: options.end } : {}),
+            },
+          }
+        : {}),
+    },
+    orderBy: { recordedAt: options.sort },
+    take: options.limit,
+  });
+}
