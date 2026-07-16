@@ -306,3 +306,108 @@ describe('reading timestamps', () => {
     expect(bufferedGapMs).toBeGreaterThan(realtimeGapMs);
   });
 });
+
+describe('GET /api/v1/readings/recent', () => {
+  // This endpoint is global (not plant-scoped), so the shared dev/test
+  // database may hold unrelated rows from seed data or other test files.
+  // Using far-future receivedAt values guarantees our own rows sort first,
+  // so assertions stay robust regardless of what else exists in the table.
+  const FAR_FUTURE = (offsetDays: number) => new Date(Date.UTC(2099, 0, 1 + offsetDays));
+
+  it('includes device and plant identifiers, raw and calibrated values, and both timestamps', async () => {
+    const reading = await prisma.sensorReading.create({
+      data: {
+        id: randomUUID(),
+        deviceId,
+        plantId,
+        recordedAt: new Date('2026-01-01T00:00:00Z'),
+        receivedAt: FAR_FUTURE(0),
+        rawMoisture: 1800,
+        moisturePercent: 38.4,
+      },
+    });
+
+    const res = await request(app).get('/api/v1/readings/recent');
+    expect(res.status).toBe(200);
+
+    const found = res.body.readings.find((r: { id: string }) => r.id === reading.id);
+    expect(found).toBeDefined();
+    expect(found.deviceId).toBe(deviceId);
+    expect(found.plantId).toBe(plantId);
+    expect(found.device.identifier).toBe(deviceIdentifier);
+    expect(found.plant.name).toBe('Reading Test Plant');
+    expect(found.rawMoisture).toBe(1800);
+    expect(found.moisturePercent).toBe(38.4);
+    expect(found.recordedAt).toBe('2026-01-01T00:00:00.000Z');
+    expect(found.receivedAt).toMatch(/Z$/);
+  });
+
+  it('sorts newest first by receivedAt, not recordedAt', async () => {
+    const olderReceived = await prisma.sensorReading.create({
+      data: {
+        id: randomUUID(),
+        deviceId,
+        plantId,
+        recordedAt: new Date('2026-06-01T00:00:00Z'), // measured later...
+        receivedAt: FAR_FUTURE(0), // ...but received first
+        rawMoisture: 1000,
+        moisturePercent: 20,
+      },
+    });
+    const newerReceived = await prisma.sensorReading.create({
+      data: {
+        id: randomUUID(),
+        deviceId,
+        plantId,
+        recordedAt: new Date('2026-01-01T00:00:00Z'), // measured earlier...
+        receivedAt: FAR_FUTURE(1), // ...but received last (e.g. a late retry)
+        rawMoisture: 1000,
+        moisturePercent: 20,
+      },
+    });
+
+    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 500 });
+    const ids = res.body.readings.map((r: { id: string }) => r.id);
+
+    expect(ids.indexOf(newerReceived.id)).toBeLessThan(ids.indexOf(olderReceived.id));
+  });
+
+  it('enforces the limit parameter', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      await prisma.sensorReading.create({
+        data: {
+          id: randomUUID(),
+          deviceId,
+          plantId,
+          recordedAt: new Date(),
+          receivedAt: FAR_FUTURE(i),
+          rawMoisture: 1000,
+          moisturePercent: 20,
+        },
+      });
+    }
+
+    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body.readings).toHaveLength(2);
+  });
+
+  it('rejects a limit above the documented maximum', async () => {
+    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 501 });
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects a limit of zero', async () => {
+    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 0 });
+    expect(res.status).toBe(400);
+  });
+
+  it('does not include a rejected submission as a reading', async () => {
+    const rejected = await authed().send(validPayload({ moisturePercent: 999 }));
+    expect(rejected.status).toBe(400);
+
+    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 500 });
+    const matches = res.body.readings.filter((r: { deviceId: string }) => r.deviceId === deviceId);
+    expect(matches).toHaveLength(0);
+  });
+});

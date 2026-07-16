@@ -191,6 +191,31 @@ requested range returns `{ "readings": [] }` — not an error. Each item has
 the same shape as "Latest reading" above (raw + calibrated values, both
 timestamps).
 
+## Recent activity (admin)
+
+`GET /api/v1/readings/recent` is a global (not plant-scoped) feed of the
+most recent pipeline activity, for an administrator inspecting what's
+coming through without querying the database directly. Same auth posture as
+the other read endpoints (unauthenticated, admin-facing).
+
+Ordered by **`receivedAt`** descending — not `recordedAt`. This is
+deliberately different from "Latest reading" / "Reading history" above:
+this view answers "what has the pipeline processed lately," so a reading
+that was measured a while ago but just arrived (e.g. a device catching up
+after a Wi-Fi outage) correctly shows up as recent activity here, even
+though it wouldn't be the "latest" measurement for its plant.
+
+Each item includes `deviceId`/`plantId` plus a joined `device.identifier`
+and `plant.name`, so entries are identifiable without a separate lookup.
+
+Query params: `limit` (default `50`, rejected with `400` above `500` — a
+smaller default and cap than "Reading history," since this is a quick
+glance, not chart data).
+
+There's no separate "rejected submissions" log: a payload that fails
+validation is never persisted, so it can never appear here — nothing
+additional needs to be filtered out.
+
 ## Running the app
 
 ```bash

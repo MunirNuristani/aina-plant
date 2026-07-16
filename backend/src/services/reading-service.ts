@@ -1,5 +1,5 @@
 import { prisma } from '../db';
-import type { SensorReading } from '../generated/prisma/client';
+import type { Prisma, SensorReading } from '../generated/prisma/client';
 import { isUniqueConstraintViolation } from '../lib/prisma-errors';
 import { ConflictError, NotFoundError, ValidationError } from '../http/errors';
 import type { PublicDevice } from './device-service';
@@ -129,5 +129,26 @@ export async function listReadingsForPlant(
     },
     orderBy: { recordedAt: options.sort },
     take: options.limit,
+  });
+}
+
+const recentReadingInclude = {
+  device: { select: { identifier: true } },
+  plant: { select: { name: true } },
+} satisfies Prisma.SensorReadingInclude;
+
+export type RecentReading = Prisma.SensorReadingGetPayload<{
+  include: typeof recentReadingInclude;
+}>;
+
+export async function listRecentReadings(limit: number): Promise<RecentReading[]> {
+  // Ordered by receivedAt (when the pipeline actually processed it), not
+  // recordedAt — this view is "what has the pipeline been doing lately,"
+  // not "what is the true measurement history" (that's the plant-history
+  // endpoint's job, which orders by recordedAt on purpose).
+  return prisma.sensorReading.findMany({
+    orderBy: { receivedAt: 'desc' },
+    take: limit,
+    include: recentReadingInclude,
   });
 }
