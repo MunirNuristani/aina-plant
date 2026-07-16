@@ -368,14 +368,31 @@ npm run format
 
 ## Testing
 
+Tests use [Vitest](https://vitest.dev/), configured in `vitest.config.ts`.
+
 ```bash
-npm test         # run once
+npm test         # run once — exits nonzero if anything fails, safe for CI
 npm run test:watch
 ```
 
-Tests run against the local Postgres (`npm run db:up` first) using your
-`.env`. Each test creates its own uniquely-identified rows and cleans them
-up afterward, so it's safe to run alongside seeded or manually-created data.
+**No production credentials are ever needed.** Tests use the same `.env`
+as local development (copied from `.env.example`, see "Setup" above) —
+just the local Docker Postgres credentials and any string that satisfies
+the format checks for `JWT_SECRET`/`AI_API_KEY`. Nothing talks to a real
+external service.
+
+Most tests exercise real HTTP routes and Postgres queries end-to-end (no
+mocking), so `npm run db:up` needs to be running first. Each such test
+creates its own uniquely-identified rows and cleans them up afterward, so
+it's safe to run alongside seeded or manually-created data. Some tests need
+no database at all — e.g. `src/lib/device-credential.test.ts` is a
+self-contained example covering pure functions with zero setup; try
+running just that file with Postgres stopped to see the difference:
+
+```bash
+npm run db:down
+npx vitest run src/lib/device-credential.test.ts
+```
 
 ## Troubleshooting database connectivity
 
