@@ -171,6 +171,26 @@ won't shadow a genuinely more recent one.
 | `200`  | `{ "reading": null }` — plant exists, has no readings yet. Not an error.                                   |
 | `404`  | Plant does not exist.                                                                                      |
 
+## Reading history
+
+`GET /api/v1/plants/:plantId/readings` returns a time-range slice of a
+plant's readings, for charts and inspection. Same auth posture as "Latest
+reading" above (unauthenticated, dashboard-facing). Query parameters (all
+optional):
+
+| Param   | Default | Meaning                                                                    |
+| ------- | ------- | -------------------------------------------------------------------------- |
+| `start` | —       | ISO 8601 UTC timestamp. Only readings with `recordedAt >= start`.          |
+| `end`   | —       | ISO 8601 UTC timestamp. Only readings with `recordedAt <= end`.            |
+| `sort`  | `asc`   | `asc` (oldest first, for charts) or `desc` (newest first, for inspection). |
+| `limit` | `100`   | Max rows returned. Rejected with `400` if above `1000`.                    |
+
+`start`/`end` can be used independently for an open-ended range. Supplying
+`start` after `end` is rejected with `400`. A plant with no readings in the
+requested range returns `{ "readings": [] }` — not an error. Each item has
+the same shape as "Latest reading" above (raw + calibrated values, both
+timestamps).
+
 ## Running the app
 
 ```bash
