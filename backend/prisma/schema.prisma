@@ -42,7 +42,8 @@ model Device {
   plantId String?
   plant   Plant?  @relation(fields: [plantId], references: [id])
 
-  readings SensorReading[]
+  readings     SensorReading[]
+  calibrations Calibration[]
 
   @@index([plantId])
 }
@@ -74,4 +75,23 @@ model SensorReading {
 
   @@index([plantId, recordedAt])
   @@index([deviceId])
+}
+
+// A device's calibration reference points (raw ADC value when fully dry vs.
+// fully wet), used to convert rawMoisture into moisturePercent. Rows are
+// never updated in place — recalibrating inserts a new row so historical
+// readings can still be interpreted using whichever calibration was
+// actually in effect at the time they were recorded.
+model Calibration {
+  id       String @id @default(uuid())
+  deviceId String
+  device   Device @relation(fields: [deviceId], references: [id])
+
+  dryValue Int
+  wetValue Int
+
+  effectiveAt DateTime @default(now()) @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([deviceId, effectiveAt])
 }
