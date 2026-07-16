@@ -1,6 +1,7 @@
 import { prisma } from '../db';
+import type { SensorReading } from '../generated/prisma/client';
 import { isUniqueConstraintViolation } from '../lib/prisma-errors';
-import { ConflictError, ValidationError } from '../http/errors';
+import { ConflictError, NotFoundError, ValidationError } from '../http/errors';
 import type { PublicDevice } from './device-service';
 import type { SensorReadingInput } from '../validation/reading';
 
@@ -79,4 +80,19 @@ export async function ingestReading(
     }
     throw error;
   }
+}
+
+export async function getLatestReadingForPlant(plantId: string): Promise<SensorReading | null> {
+  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  if (!plant) {
+    throw new NotFoundError('Plant not found');
+  }
+
+  // "Newest" means most recently measured (recordedAt), not most recently
+  // received — a late-arriving buffered reading shouldn't shadow a genuinely
+  // more recent one just because it happened to reach the server first.
+  return prisma.sensorReading.findFirst({
+    where: { plantId },
+    orderBy: { recordedAt: 'desc' },
+  });
 }

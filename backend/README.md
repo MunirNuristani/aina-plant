@@ -154,6 +154,23 @@ the server can recognize the retry:
   completely untouched. A `readingId` can never be used to overwrite another
   device's reading.
 
+## Latest reading
+
+`GET /api/v1/plants/:plantId/readings/latest` is how the dashboard fetches a
+plant's current state. Unauthenticated — this is a dashboard/admin-facing
+read endpoint, not a device-facing one, and there's no user/admin auth
+system in this project yet.
+
+"Newest" means most recently **measured** (`recordedAt`), not most recently
+received — a buffered reading that arrives late with an old `recordedAt`
+won't shadow a genuinely more recent one.
+
+| Status | Meaning                                                                                                    |
+| ------ | ---------------------------------------------------------------------------------------------------------- |
+| `200`  | `{ "reading": {...} }` — full row, including `rawMoisture`, `moisturePercent`, `recordedAt`, `receivedAt`. |
+| `200`  | `{ "reading": null }` — plant exists, has no readings yet. Not an error.                                   |
+| `404`  | Plant does not exist.                                                                                      |
+
 ## Running the app
 
 ```bash
