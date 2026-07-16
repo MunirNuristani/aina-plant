@@ -1,6 +1,7 @@
 import { prisma } from '../db';
 import type { Prisma, SensorReading } from '../generated/prisma/client';
 import { isUniqueConstraintViolation } from '../lib/prisma-errors';
+import { logger } from '../lib/logger';
 import { ConflictError, NotFoundError, ValidationError } from '../http/errors';
 import type { PublicDevice } from './device-service';
 import type { SensorReadingInput } from '../validation/reading';
@@ -34,6 +35,11 @@ export async function ingestReading(
       throw new ConflictError('readingId is already used by a different device');
     }
 
+    logger.info(
+      { readingId: existing.id, deviceId: device.id },
+      'Duplicate reading ignored (idempotent retry)',
+    );
+
     await touchLastSeen(device.id);
     return {
       readingId: existing.id,
@@ -57,6 +63,11 @@ export async function ingestReading(
       },
     });
 
+    logger.info(
+      { readingId: reading.id, deviceId: device.id, plantId: device.plantId },
+      'Reading ingested',
+    );
+
     await touchLastSeen(device.id);
     return {
       readingId: reading.id,
@@ -70,6 +81,12 @@ export async function ingestReading(
       const reading = await prisma.sensorReading.findUniqueOrThrow({
         where: { id: input.readingId },
       });
+
+      logger.info(
+        { readingId: reading.id, deviceId: device.id },
+        'Duplicate reading ignored (concurrent retry)',
+      );
+
       await touchLastSeen(device.id);
       return {
         readingId: reading.id,
@@ -78,6 +95,11 @@ export async function ingestReading(
         receivedAt: reading.receivedAt.toISOString(),
       };
     }
+
+    logger.error(
+      { err: error, readingId: input.readingId, deviceId: device.id },
+      'Reading ingestion failed due to a database error',
+    );
     throw error;
   }
 }

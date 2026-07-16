@@ -106,13 +106,58 @@ Every request gets a correlation ID via `requestIdMiddleware`
 The ID is also available to code that has no access to `req` at all — e.g.
 `device-service.ts`'s auth-rejection logging — via `getRequestId()`
 (`src/lib/request-context.ts`), backed by Node's `AsyncLocalStorage`. Use
-the shared `logger` (`src/lib/logger.ts`) instead of calling `console.*`
+the shared `logger` (see "Logging" below) instead of calling `console.*`
 directly anywhere in a request's code path, and the current request ID is
-prefixed onto the log line automatically.
+attached to the log line automatically as a `requestId` field.
 
 Two requests sharing the same ID (whether by client mistake or by design)
 never interfere with each other — `AsyncLocalStorage` scopes by the actual
 async call graph of each request, not by the ID value itself.
+
+## Logging
+
+The app uses [pino](https://getpino.io/) (`src/lib/logger.ts`) for
+structured (JSON) logging, exported as a shared `logger` singleton. Always
+log through it — never call `console.*` directly in application code — so
+every line gets request-ID attribution and redaction consistently.
+
+```bash
+LOG_LEVEL=debug npm run dev   # more verbose than the "info" default
+```
+
+`LOG_LEVEL` (env var, see `.env.example`) sets the minimum level emitted:
+`trace | debug | info | warn | error | fatal | silent`. Defaults to `info`.
+
+Output is always raw JSON, even in development — there's no in-process
+"pretty" transport, since pino's transports run in a separate worker
+thread, which would make output impossible to intercept in tests and adds
+complexity for little benefit. For readable local output, pipe it through
+`pino-pretty` (already a dev dependency):
+
+```bash
+npm run dev | npx pino-pretty
+```
+
+**What's logged today** (all via the shared `logger`):
+
+| Event                                                            | Where                                            | Level   |
+| ---------------------------------------------------------------- | ------------------------------------------------ | ------- |
+| Device auth rejected (missing headers, bad credential, disabled) | `device-auth.ts` middleware, `device-service.ts` | `warn`  |
+| Reading payload failed validation                                | `routes/readings.ts`                             | `warn`  |
+| Reading ingested successfully                                    | `services/reading-service.ts`                    | `info`  |
+| Duplicate reading ignored (retry or concurrent race)             | `services/reading-service.ts`                    | `info`  |
+| Reading ingestion failed for a non-duplicate database error      | `services/reading-service.ts`                    | `error` |
+| Startup database connectivity failure                            | `db/index.ts`                                    | `fatal` |
+| Unhandled error reaching the top-level error handler             | `app.ts`                                         | `error` |
+
+**Redaction**: `credential`, `credentialHash`, and `key` fields (at the top
+level or one level nested) are replaced with `[Redacted]` before output,
+regardless of where in the object they appear — this is a safety net in
+addition to the existing discipline of never passing a raw secret to a log
+call in the first place (see `device-service.ts`'s `authenticateDevice`).
+`DATABASE_URL`'s password is masked separately, before it ever reaches the
+logger (see `db/index.ts`), since it needs to show the rest of the
+connection string rather than be fully redacted.
 
 ## Device authentication
 

@@ -16,9 +16,7 @@ export const envSchema = z.object({
 
   AI_API_KEY: z.string().min(1, 'AI_API_KEY is required'),
 
-  LOG_LEVEL: z
-    .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent'])
-    .default('info'),
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
 });
 
 export type Env = z.infer<typeof envSchema>;

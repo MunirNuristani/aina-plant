@@ -1,9 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
+import { logger } from '../lib/logger';
+import { ingestReading } from '../services/reading-service';
+import type { SensorReadingInput } from '../validation/reading';
 
 const app = createApp();
 const SECRET = 'reading-test-secret';
@@ -409,5 +412,100 @@ describe('GET /api/v1/readings/recent', () => {
     const res = await request(app).get('/api/v1/readings/recent').query({ limit: 500 });
     const matches = res.body.readings.filter((r: { deviceId: string }) => r.deviceId === deviceId);
     expect(matches).toHaveLength(0);
+  });
+});
+
+describe('operational logging', () => {
+  it('logs an authentication failure', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+
+    const res = await request(app)
+      .post('/api/v1/readings')
+      .set('X-Device-Id', deviceIdentifier)
+      .set('X-Device-Key', 'wrong-secret')
+      .send(validPayload());
+
+    expect(res.status).toBe(401);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: deviceIdentifier }),
+      expect.stringContaining('invalid credentials'),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs a validation failure with the device ID and issues', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+
+    const res = await authed().send(validPayload({ moisturePercent: 999 }));
+
+    expect(res.status).toBe(400);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deviceId,
+        issues: expect.arrayContaining([expect.objectContaining({ path: ['moisturePercent'] })]),
+      }),
+      'Reading validation failed',
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('logs successful ingestion with the reading, device, and plant IDs', async () => {
+    const infoSpy = vi.spyOn(logger, 'info');
+    const payload = validPayload();
+
+    const res = await authed().send(payload);
+
+    expect(res.status).toBe(201);
+    expect(infoSpy).toHaveBeenCalledWith(
+      { readingId: payload.readingId, deviceId, plantId },
+      'Reading ingested',
+    );
+
+    infoSpy.mockRestore();
+  });
+
+  it('logs a duplicate submission', async () => {
+    const payload = validPayload();
+    await authed().send(payload);
+
+    const infoSpy = vi.spyOn(logger, 'info');
+    const res = await authed().send(payload);
+
+    expect(res.status).toBe(200);
+    expect(infoSpy).toHaveBeenCalledWith(
+      { readingId: payload.readingId, deviceId },
+      'Duplicate reading ignored (idempotent retry)',
+    );
+
+    infoSpy.mockRestore();
+  });
+
+  it('logs a genuine database failure during ingestion', async () => {
+    const deviceRow = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
+    const { credentialHash: _credentialHash, ...publicDevice } = deviceRow;
+
+    // Bypasses the route's zod validation on purpose, to reach Prisma with
+    // a value that only the DB-level CHECK constraint rejects (not a
+    // duplicate/unique-constraint case, which is logged and tested above).
+    const badInput = {
+      readingId: randomUUID(),
+      deviceId,
+      recordedAt: '2026-07-16T10:00:00Z',
+      rawMoisture: 2048,
+      moisturePercent: 999,
+    } as SensorReadingInput;
+
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    await expect(ingestReading(badInput, publicDevice)).rejects.toThrow();
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ readingId: badInput.readingId, deviceId }),
+      'Reading ingestion failed due to a database error',
+    );
+
+    errorSpy.mockRestore();
   });
 });

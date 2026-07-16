@@ -101,12 +101,12 @@ export async function authenticateDevice(
   // Never log `credential` here or anywhere below — only the identifier,
   // which is a lookup key, not a secret.
   if (!device || !verifyDeviceCredential(credential, device.credentialHash)) {
-    logger.warn(`[device-auth] rejected identifier="${identifier}" reason="invalid credentials"`);
+    logger.warn({ identifier }, 'device auth rejected: invalid credentials');
     throw new UnauthorizedError('Invalid device identifier or credential');
   }
 
   if (!device.enabled) {
-    logger.warn(`[device-auth] rejected identifier="${identifier}" reason="device disabled"`);
+    logger.warn({ identifier }, 'device auth rejected: device disabled');
     throw new ForbiddenError('Device is disabled');
   }
 

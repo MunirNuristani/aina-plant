@@ -1,5 +1,6 @@
 import { config } from '../config';
 import { prisma } from './prisma';
+import { logger } from '../lib/logger';
 
 export { prisma } from './prisma';
 
@@ -43,12 +44,11 @@ export async function verifyDatabaseConnection(): Promise<void> {
   } catch (error) {
     const reason = describeError(error);
 
-    console.error('Failed to connect to the database:');
-    console.error(`  DATABASE_URL: ${maskConnectionString(config.DATABASE_URL)}`);
-    console.error(`  Reason: ${reason}`);
-    console.error(
-      '\nIs PostgreSQL running? Start it with `docker compose up -d` from the backend/ directory,' +
-        ' and see backend/README.md for troubleshooting.',
+    logger.fatal(
+      { databaseUrl: maskConnectionString(config.DATABASE_URL), reason },
+      'Failed to connect to the database. Is PostgreSQL running? ' +
+        'Start it with `docker compose up -d` from the backend/ directory, ' +
+        'and see backend/README.md for troubleshooting.',
     );
 
     process.exit(1);
