@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app';
 import { prisma } from '../db';
+import { hashDeviceCredential } from '../lib/device-credential';
+import { logger } from '../lib/logger';
 
 const app = createApp();
 
@@ -67,7 +69,9 @@ describe('POST /devices', () => {
   });
 
   it('stores an optional firmwareVersion when provided', async () => {
-    const res = await request(app).post('/devices').send(validPayload({ firmwareVersion: '1.2.3' }));
+    const res = await request(app)
+      .post('/devices')
+      .send(validPayload({ firmwareVersion: '1.2.3' }));
     expect(res.body.device.firmwareVersion).toBe('1.2.3');
   });
 
@@ -102,7 +106,9 @@ describe('POST /devices', () => {
     const first = await request(app).post('/devices').send(payload);
     expect(first.status).toBe(201);
 
-    const second = await request(app).post('/devices').send(validPayload({ identifier: payload.identifier }));
+    const second = await request(app)
+      .post('/devices')
+      .send(validPayload({ identifier: payload.identifier }));
     expect(second.status).toBe(409);
 
     const count = await prisma.device.count({ where: { identifier: payload.identifier } });
@@ -149,12 +155,16 @@ describe('POST /devices', () => {
   });
 
   it('rejects an empty name', async () => {
-    const res = await request(app).post('/devices').send(validPayload({ name: '' }));
+    const res = await request(app)
+      .post('/devices')
+      .send(validPayload({ name: '' }));
     expect(res.status).toBe(400);
   });
 
   it('rejects a name over 100 characters', async () => {
-    const res = await request(app).post('/devices').send(validPayload({ name: 'x'.repeat(101) }));
+    const res = await request(app)
+      .post('/devices')
+      .send(validPayload({ name: 'x'.repeat(101) }));
     expect(res.status).toBe(400);
   });
 
@@ -178,5 +188,110 @@ describe('POST /devices', () => {
 
     const stored = await prisma.device.findUnique({ where: { identifier: payload.identifier } });
     expect(stored).toBeNull();
+  });
+});
+
+describe('POST /devices/:id/rotate-credential', () => {
+  const ORIGINAL_SECRET = 'original-secret-before-rotation';
+  let deviceId: string;
+  let identifier: string;
+
+  beforeEach(async () => {
+    identifier = `registration-test-device-${randomUUID()}`;
+    const device = await prisma.device.create({
+      data: {
+        name: 'Rotation Test Device',
+        identifier,
+        credentialHash: hashDeviceCredential(ORIGINAL_SECRET),
+        enabled: true,
+      },
+    });
+    deviceId = device.id;
+  });
+
+  afterEach(async () => {
+    await prisma.device.deleteMany({ where: { id: deviceId } });
+  });
+
+  it('returns a new credential once, distinct from the original', async () => {
+    const res = await request(app).post(`/devices/${deviceId}/rotate-credential`).send();
+
+    expect(res.status).toBe(200);
+    expect(typeof res.body.credential).toBe('string');
+    expect(res.body.credential.length).toBeGreaterThan(0);
+    expect(res.body.credential).not.toBe(ORIGINAL_SECRET);
+  });
+
+  it('leaves the device id, identifier, and other fields unchanged', async () => {
+    const res = await request(app).post(`/devices/${deviceId}/rotate-credential`).send();
+
+    expect(res.body.device.id).toBe(deviceId);
+    expect(res.body.device.identifier).toBe(identifier);
+  });
+
+  it('never returns credentialHash', async () => {
+    const res = await request(app).post(`/devices/${deviceId}/rotate-credential`).send();
+    expect(res.body.device.credentialHash).toBeUndefined();
+    expect(res.body.device.credential).toBeUndefined();
+  });
+
+  it('actually changes the stored hash', async () => {
+    const before = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
+    await request(app).post(`/devices/${deviceId}/rotate-credential`).send();
+    const after = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
+
+    expect(after.credentialHash).not.toBe(before.credentialHash);
+  });
+
+  it('makes the old credential stop authenticating', async () => {
+    await request(app).post(`/devices/${deviceId}/rotate-credential`).send();
+
+    const authRes = await request(app)
+      .post('/devices/auth')
+      .send({ identifier, credential: ORIGINAL_SECRET });
+
+    expect(authRes.status).toBe(401);
+  });
+
+  it('makes the new credential authenticate successfully', async () => {
+    const rotateRes = await request(app).post(`/devices/${deviceId}/rotate-credential`).send();
+
+    const authRes = await request(app)
+      .post('/devices/auth')
+      .send({ identifier, credential: rotateRes.body.credential });
+
+    expect(authRes.status).toBe(200);
+    expect(authRes.body.device.id).toBe(deviceId);
+  });
+
+  it('returns 404 for a nonexistent device', async () => {
+    const res = await request(app).post(`/devices/${randomUUID()}/rotate-credential`).send();
+    expect(res.status).toBe(404);
+  });
+
+  it('never logs the old or new secret', async () => {
+    const warnSpy = vi.spyOn(logger, 'warn');
+    const infoSpy = vi.spyOn(logger, 'info');
+    const errorSpy = vi.spyOn(logger, 'error');
+
+    const rotateRes = await request(app).post(`/devices/${deviceId}/rotate-credential`).send();
+    const newSecret = rotateRes.body.credential;
+
+    // Exercise both the now-invalid old credential and the new one, since
+    // authenticateDevice() is the other place a secret could leak into a
+    // log call.
+    await request(app).post('/devices/auth').send({ identifier, credential: ORIGINAL_SECRET });
+    await request(app).post('/devices/auth').send({ identifier, credential: newSecret });
+
+    const allLoggedArgs = [...warnSpy.mock.calls, ...infoSpy.mock.calls, ...errorSpy.mock.calls]
+      .flat()
+      .map((arg) => JSON.stringify(arg));
+
+    expect(allLoggedArgs.some((line) => line.includes(ORIGINAL_SECRET))).toBe(false);
+    expect(allLoggedArgs.some((line) => line.includes(newSecret))).toBe(false);
+
+    warnSpy.mockRestore();
+    infoSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 });

@@ -9,6 +9,7 @@ import {
   assignDeviceToPlant,
   authenticateDevice,
   registerDevice,
+  rotateDeviceCredential,
   updateDeviceConfig,
 } from '../services/device-service';
 import { toFieldErrors, ValidationError } from '../http/errors';
@@ -49,6 +50,11 @@ devicesRouter.patch('/:id', async (req, res) => {
 
   const device = await updateDeviceConfig(req.params.id, parsed.data);
   res.status(200).json(device);
+});
+
+devicesRouter.post('/:id/rotate-credential', async (req, res) => {
+  const result = await rotateDeviceCredential(req.params.id);
+  res.status(200).json(result);
 });
 
 devicesRouter.post('/:id/assign', async (req, res) => {
