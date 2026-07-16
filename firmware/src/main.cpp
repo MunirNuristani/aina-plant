@@ -1,7 +1,11 @@
 #include <Arduino.h>
+#include <esp_random.h>
+#include <time.h>
+#include <cstring>
 #include "SoilMoistureSensor.h"
 #include "MoistureCalibration.h"
 #include "WifiService.h"
+#include "FirmwareReading.h"
 
 // GPIO34: an ADC1-capable, input-only pin — ADC1 (unlike ADC2) stays usable
 // even once Wi-Fi is active, which matters once this firmware starts
@@ -42,8 +46,38 @@ constexpr unsigned long LOOP_DELAY_MS = 5000;
 constexpr const char* WIFI_SSID = "YOUR_SSID";
 constexpr const char* WIFI_PASSWORD = "YOUR_PASSWORD";
 
+// Placeholder — replace with this device's real Device.id (a UUID) as
+// returned by the backend's device registration endpoint
+// (POST /api/v1/devices). This is deliberately NOT the same value as
+// whatever identifier the device authenticates with (X-Device-Id) — see
+// FirmwareReading.h's deviceId field comment for why they differ.
+constexpr const char* DEVICE_ID = "00000000-0000-0000-0000-000000000000";
+constexpr const char* FIRMWARE_VERSION = "1.0.0";
+
+// Anything before this means the ESP32's clock hasn't received NTP time
+// yet (it boots at epoch 0) — used to detect "not synced" rather than
+// reporting a bogus 1970 timestamp. 2024-01-01T00:00:00Z; arbitrary other
+// than being comfortably before any real deployment and comfortably after
+// epoch 0.
+constexpr time_t PLAUSIBLE_MIN_EPOCH = 1704067200;
+
 SoilMoistureSensor soilSensor(SOIL_SENSOR_PIN, SOIL_SENSOR_SAMPLE_COUNT, SOIL_SENSOR_SAMPLE_DELAY_MS);
 WifiService wifiService(WIFI_SSID, WIFI_PASSWORD);
+bool ntpSyncStarted = false;
+
+// Thin glue around the ESP32's hardware RNG (esp_random(), part of the
+// ESP-IDF, not a library worth wrapping any further) plus UuidV4's pure
+// formatter. Lives here rather than in a lib/ module because there's no
+// logic in it worth unit-testing separately from formatUuidV4() itself,
+// which already is (see test/test_uuid_v4/).
+void generateReadingId(char out[UUID_V4_STRING_LENGTH + 1]) {
+  uint8_t randomBytes[16];
+  for (int i = 0; i < 4; i++) {
+    uint32_t word = esp_random();
+    memcpy(randomBytes + i * 4, &word, sizeof(word));
+  }
+  formatUuidV4(randomBytes, out);
+}
 
 void setup() {
   Serial.begin(115200);
@@ -67,6 +101,16 @@ void loop() {
   // iteration regardless of how long the rest of loop() takes.
   wifiService.update();
 
+  // Kicked off once, as soon as Wi-Fi first connects — SNTP then syncs
+  // asynchronously in the background; time(nullptr) starts returning real
+  // wall-clock time once that finishes (checked below via
+  // PLAUSIBLE_MIN_EPOCH), typically within a few seconds.
+  if (wifiService.isConnected() && !ntpSyncStarted) {
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    ntpSyncStarted = true;
+    Serial.println("[main] NTP sync started");
+  }
+
   SoilMoistureSample sample = soilSensor.read();
 
   // The correct usage pattern: always check success before touching
@@ -80,16 +124,44 @@ void loop() {
 
   MoistureReading moisture = convertToMoisturePercent(sample.rawValue, soilCalibration);
 
-  if (moisture.success) {
-    Serial.printf("Reading OK: rawMoisture=%d moisturePercent=%.1f\n", moisture.rawValue,
-                  moisture.moisturePercent);
-  } else {
+  if (!moisture.success) {
     // The raw value is still valid and available here (moisture.rawValue)
     // even though no percentage could be computed — it's just not shown
     // in this demo log line, since there's nothing to report yet without
     // a working calibration.
     Serial.printf("Conversion FAILED: %s (rawMoisture=%d preserved)\n", moisture.errorMessage,
                   moisture.rawValue);
+    delay(LOOP_DELAY_MS);
+    return;
+  }
+
+  Serial.printf("Reading OK: rawMoisture=%d moisturePercent=%.1f\n", moisture.rawValue,
+                moisture.moisturePercent);
+
+  time_t now = time(nullptr);
+  if (now < PLAUSIBLE_MIN_EPOCH) {
+    Serial.println("[main] Skipping reading payload: time not yet synced (NTP pending)");
+    delay(LOOP_DELAY_MS);
+    return;
+  }
+
+  FirmwareReading reading{};
+  generateReadingId(reading.readingId);
+  strncpy(reading.deviceId, DEVICE_ID, sizeof(reading.deviceId) - 1);
+  formatIso8601Utc(static_cast<uint32_t>(now), reading.recordedAt);
+  reading.rawMoisture = moisture.rawValue;
+  reading.moisturePercent = moisture.moisturePercent;
+  strncpy(reading.firmwareVersion, FIRMWARE_VERSION, sizeof(reading.firmwareVersion) - 1);
+  reading.hasWifiRssi = wifiService.isConnected();
+  reading.wifiRssi = WiFi.RSSI();
+
+  char json[FIRMWARE_READING_JSON_BUFFER_SIZE];
+  size_t len = serializeFirmwareReading(reading, json, sizeof(json));
+  if (len > 0) {
+    Serial.print("[main] Reading JSON: ");
+    Serial.println(json);
+  } else {
+    Serial.println("[main] Reading JSON serialization failed (buffer too small)");
   }
 
   delay(LOOP_DELAY_MS);
