@@ -50,6 +50,112 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+describe('POST /api/v1/plants', () => {
+  const createdPlantIds: string[] = [];
+
+  afterEach(async () => {
+    if (createdPlantIds.length > 0) {
+      await prisma.plant.deleteMany({ where: { id: { in: createdPlantIds } } });
+      createdPlantIds.length = 0;
+    }
+  });
+
+  function post(body: unknown) {
+    return request(app).post('/api/v1/plants').send(body);
+  }
+
+  it('creates a valid plant and returns 201 with the full created record', async () => {
+    const payload = {
+      name: 'Fiddle Leaf Fig',
+      commonName: 'Fiddle Leaf Fig',
+      scientificName: 'Ficus lyrata',
+      location: 'Living room',
+      notes: 'Likes bright indirect light',
+      potSize: '10in',
+      soilType: 'Well-draining potting mix',
+    };
+
+    const res = await post(payload);
+    createdPlantIds.push(res.body.plant?.id);
+
+    expect(res.status).toBe(201);
+    expect(res.body.plant).toMatchObject(payload);
+    expect(res.body.plant.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(res.body.plant.createdAt).toMatch(/Z$/);
+    expect(res.body.plant.updatedAt).toMatch(/Z$/);
+  });
+
+  it('creates a plant with only the required name', async () => {
+    const res = await post({ name: 'Minimal Plant' });
+    createdPlantIds.push(res.body.plant?.id);
+
+    expect(res.status).toBe(201);
+    expect(res.body.plant.name).toBe('Minimal Plant');
+    expect(res.body.plant.commonName).toBeNull();
+  });
+
+  it('rejects a missing name with a standard-format field error', async () => {
+    const res = await post({ location: 'Kitchen' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'name' })]),
+    );
+  });
+
+  it('rejects a whitespace-only name', async () => {
+    const res = await post({ name: '   ' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'name' })]),
+    );
+  });
+
+  it('rejects a name over 100 characters', async () => {
+    const res = await post({ name: 'x'.repeat(101) });
+    expect(res.status).toBe(400);
+  });
+
+  it('trims leading/trailing whitespace from the name', async () => {
+    const res = await post({ name: '  Snake Plant  ' });
+    createdPlantIds.push(res.body.plant?.id);
+
+    expect(res.status).toBe(201);
+    expect(res.body.plant.name).toBe('Snake Plant');
+  });
+
+  it('accepts empty strings for optional fields', async () => {
+    const res = await post({ name: 'Empty Fields Plant', commonName: '', notes: '' });
+    createdPlantIds.push(res.body.plant?.id);
+
+    expect(res.status).toBe(201);
+    expect(res.body.plant.commonName).toBe('');
+    expect(res.body.plant.notes).toBe('');
+  });
+
+  it('does not create a plant when validation fails', async () => {
+    const before = await prisma.plant.count();
+    await post({ name: '' });
+    const after = await prisma.plant.count();
+
+    expect(after).toBe(before);
+  });
+
+  it('persists the created plant so it can be retrieved afterward', async () => {
+    const res = await post({ name: 'Retrievable Plant', location: 'Office' });
+    createdPlantIds.push(res.body.plant?.id);
+    expect(res.status).toBe(201);
+
+    const stored = await prisma.plant.findUnique({ where: { id: res.body.plant.id } });
+    expect(stored).not.toBeNull();
+    expect(stored?.name).toBe('Retrievable Plant');
+    expect(stored?.location).toBe('Office');
+  });
+});
+
 describe('GET /api/v1/plants/:plantId/readings/latest', () => {
   it('returns 404 for a nonexistent plant', async () => {
     const res = await request(app).get(`/api/v1/plants/${randomUUID()}/readings/latest`);
