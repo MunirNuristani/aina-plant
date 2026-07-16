@@ -198,6 +198,28 @@ shape once across a major version in this project. (Log statements that
 also want the raw Zod issues, e.g. for debugging, can still log them
 directly — only the client-facing `details` needs the stable shape.)
 
+## Health check
+
+`GET /health` reports whether the app and its database dependency are up —
+point a load balancer / orchestrator health probe at it. Unauthenticated,
+read-only (a single `SELECT 1`, via `isDatabaseHealthy()` in `src/db/index.ts`).
+
+```json
+{ "status": "healthy", "database": "healthy", "requestId": "..." }
+```
+
+| Status | Body                               |
+| ------ | ---------------------------------- |
+| `200`  | `status`/`database`: `"healthy"`   |
+| `503`  | `status`/`database`: `"unhealthy"` |
+
+On failure, the response never includes the connection string, the
+underlying error message, or a stack trace — those go only to
+`logger.error`, correlated by `requestId`. This is deliberately a separate
+code path from `verifyDatabaseConnection()` (the startup check, which
+exits the process on failure): a failed health check should make an
+already-running instance report unhealthy, not crash it.
+
 ## Device authentication
 
 Routes that a device itself calls (e.g. reading ingestion, below) are
