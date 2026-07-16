@@ -1,10 +1,9 @@
-import express, { Application, NextFunction, Request, Response } from 'express';
+import express, { Application } from 'express';
 import { devicesRouter } from './routes/devices';
 import { readingsRouter } from './routes/readings';
 import { plantsRouter } from './routes/plants';
-import { AppError } from './http/errors';
 import { requestIdMiddleware } from './middleware/request-id';
-import { logger } from './lib/logger';
+import { errorHandler, notFoundHandler } from './middleware/error-handler';
 
 export function createApp(): Application {
   const app = express();
@@ -24,25 +23,8 @@ export function createApp(): Application {
   app.use('/api/v1/readings', readingsRouter);
   app.use('/api/v1/plants', plantsRouter);
 
-  app.use((req, res) => {
-    res.status(404).json({ error: { message: 'Not found', requestId: req.id } });
-  });
-
-  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
-    if (err instanceof AppError) {
-      res.status(err.statusCode).json({
-        error: {
-          message: err.message,
-          requestId: req.id,
-          ...(err.details ? { details: err.details } : {}),
-        },
-      });
-      return;
-    }
-
-    logger.error({ err }, 'Unhandled error');
-    res.status(500).json({ error: { message: 'Internal server error', requestId: req.id } });
-  });
+  app.use(notFoundHandler);
+  app.use(errorHandler);
 
   return app;
 }

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getLatestReadingForPlant, listReadingsForPlant } from '../services/reading-service';
 import { listReadingsQuerySchema } from '../validation/reading-query';
-import { ValidationError } from '../http/errors';
+import { toFieldErrors, ValidationError } from '../http/errors';
 
 export const plantsRouter = Router();
 
@@ -13,7 +13,7 @@ plantsRouter.get('/:plantId/readings/latest', async (req, res) => {
 plantsRouter.get('/:plantId/readings', async (req, res) => {
   const parsed = listReadingsQuerySchema.safeParse(req.query);
   if (!parsed.success) {
-    throw new ValidationError('Invalid query parameters', parsed.error.issues);
+    throw new ValidationError('Invalid query parameters', toFieldErrors(parsed.error.issues));
   }
 
   const readings = await listReadingsForPlant(req.params.plantId, {

@@ -127,7 +127,7 @@ describe('POST /api/v1/readings', () => {
     const res = await authed().send(validPayload({ moisturePercent: 150 }));
     expect(res.status).toBe(400);
     expect(res.body.error.details).toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: ['moisturePercent'] })]),
+      expect.arrayContaining([expect.objectContaining({ field: 'moisturePercent' })]),
     );
   });
 
@@ -138,7 +138,7 @@ describe('POST /api/v1/readings', () => {
     const res = await authed().send(payload);
     expect(res.status).toBe(400);
     expect(res.body.error.details).toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: ['rawMoisture'] })]),
+      expect.arrayContaining([expect.objectContaining({ field: 'rawMoisture' })]),
     );
   });
 
