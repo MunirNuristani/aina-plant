@@ -191,6 +191,75 @@ so it's excluded from the `native` PlatformIO environment (see
 The one piece of non-trivial logic it relies on — the retry-delay timing —
 is factored into `RetryTimer`, which *is* natively unit-tested.
 
+## Firmware reading payload
+
+`lib/FirmwareReading/` builds and serializes the JSON payload the backend's
+`POST /api/v1/readings` expects, matching
+`backend/src/validation/reading.ts`'s `sensorReadingSchema` field-for-field:
+`readingId`, `deviceId`, `recordedAt`, `rawMoisture`, `moisturePercent`, and
+— only when present — `firmwareVersion` and `wifiRssi`.
+
+This module (and the two it's built on, `lib/UuidV4/` and `lib/Iso8601/`)
+holds fixed-size buffers only — no Arduino `String`, no dynamic allocation
+— and has **no Arduino dependency at all**, unlike `SoilMoistureSensor` and
+`WifiService`. ArduinoJson itself is explicitly designed to build on plain
+C++ as well as Arduino, so the whole reading-assembly-and-serialization
+path is unit-tested on the host machine (`test/test_firmware_reading/`,
+`test/test_uuid_v4/`, `test/test_iso8601/`) rather than only ever trusted
+because it "looks right" once flashed.
+
+Generating the *inputs* to a `FirmwareReading` — a random reading ID, the
+current wall-clock time, a live RSSI reading — is hardware-dependent and
+deliberately kept out of this module; `main.cpp` is where those get
+gathered (see below) and handed in as plain values.
+
+### Stable reading IDs
+
+`readingId` is a UUID v4, generated once when a reading is captured (see
+`generateReadingId()` in `main.cpp`, which gathers 16 bytes from the
+ESP32's hardware RNG (`esp_random()`) and hands them to `UuidV4`'s pure
+formatter). "Stable" means this ID is generated **once** per physical
+reading and reused for that reading's entire lifetime — including any
+future retry of submitting it — never regenerated per submission attempt.
+That's what lets the backend's idempotent-retry handling
+(`reading-service.ts`'s duplicate-`readingId` path) recognize a retried
+submission as the same reading rather than creating a duplicate row.
+
+`lib/UuidV4/` only *formats* 16 given bytes into a UUID v4 string (forcing
+the RFC 4122 version/variant bits); it doesn't generate randomness itself,
+which is what keeps it Arduino-free and natively testable with
+deterministic byte arrays.
+
+### ISO 8601 timestamps and NTP
+
+`lib/Iso8601/` formats a UTC epoch time into `"YYYY-MM-DDTHH:MM:SSZ"`,
+matching the backend's `z.iso.datetime()` check. It takes `uint32_t`
+epoch seconds rather than `time_t` on purpose — `time_t` is commonly a
+signed 32-bit type that overflows at 2038-01-19T03:14:07Z (the "Y2038
+problem"); `uint32_t` covers every date up to 2106-02-07T06:28:15Z, both
+verified in `test/test_iso8601/`.
+
+The ESP32 has no wall-clock time until it's told one: `main.cpp` kicks off
+an NTP sync (`configTime()`) once `WifiService` first reports connected,
+and `time(nullptr)` starts returning real UTC time asynchronously once
+that finishes (typically a few seconds). Until then, `main.cpp` skips
+building a reading payload entirely rather than reporting a meaningless
+1970 timestamp — the same "never fabricate data" principle
+`SoilMoistureSensor` and `MoistureCalibration` apply to their own failure
+cases.
+
+### deviceId vs. the X-Device-Id header — these are not the same value
+
+The backend's `Device` model has two separate identifying fields (see
+`backend/prisma/schema.prisma`): `identifier` (a human-chosen string, used
+for the `X-Device-Id` auth header) and `id` (a server-generated UUID). The
+reading payload's `deviceId` field must be the device's `id`, **not** its
+`identifier` — `ingestReading()` checks it against the *authenticated*
+device's `id`. `main.cpp` holds this as a separate `DEVICE_ID` placeholder
+constant — fill it in with the real UUID returned by the backend's device
+registration endpoint (`POST /api/v1/devices`) once a device is
+registered.
+
 ## Project layout
 
 ```
@@ -201,6 +270,12 @@ firmware/
   lib/MoistureCalibration/           Converts raw → percent (pure logic, natively testable)
   lib/RetryTimer/                    Overflow-safe "should retry now" timing (pure logic, natively testable)
   lib/WifiService/                   Non-blocking Wi-Fi connect/reconnect + redacted logging (needs Arduino/hardware)
+  lib/UuidV4/                        UUID v4 formatting from given random bytes (pure logic, natively testable)
+  lib/Iso8601/                       Epoch seconds → ISO 8601 UTC string (pure logic, natively testable)
+  lib/FirmwareReading/               API-compatible reading struct + ArduinoJson serializer (pure logic, natively testable)
   test/test_moisture_calibration/    Unit tests for MoistureCalibration (`pio test -e native`)
   test/test_retry_timer/             Unit tests for RetryTimer (`pio test -e native`)
+  test/test_uuid_v4/                 Unit tests for UuidV4 (`pio test -e native`)
+  test/test_iso8601/                 Unit tests for Iso8601 (`pio test -e native`)
+  test/test_firmware_reading/        Unit tests for FirmwareReading (`pio test -e native`)
 ```
