@@ -196,7 +196,7 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error.details).toEqual(
-      expect.arrayContaining([expect.objectContaining({ path: ['start'] })]),
+      expect.arrayContaining([expect.objectContaining({ field: 'start' })]),
     );
   });
 

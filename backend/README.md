@@ -159,6 +159,45 @@ call in the first place (see `device-service.ts`'s `authenticateDevice`).
 logger (see `db/index.ts`), since it needs to show the rest of the
 connection string rather than be fully redacted.
 
+## Errors
+
+Every error response — expected or not — has the same shape:
+
+```json
+{ "error": { "code": "VALIDATION_ERROR", "message": "...", "requestId": "...", "details": [...] } }
+```
+
+`details` is only present when the error provides it. `code` is a stable,
+machine-readable identifier — prefer branching on it over the HTTP status
+alone, since a status like `409` can mean more than one thing depending on
+the endpoint.
+
+Application code throws one of the typed errors in `src/http/errors.ts`
+(each declares its own `statusCode` and `code`):
+
+| Error               | Status | Code               |
+| ------------------- | ------ | ------------------ |
+| `ValidationError`   | 400    | `VALIDATION_ERROR` |
+| `UnauthorizedError` | 401    | `UNAUTHORIZED`     |
+| `ForbiddenError`    | 403    | `FORBIDDEN`        |
+| `NotFoundError`     | 404    | `NOT_FOUND`        |
+| `ConflictError`     | 409    | `CONFLICT`         |
+
+`errorHandler` (`src/middleware/error-handler.ts`, registered last in
+`app.ts`) turns these into the response above. Anything else — a plain
+`Error`, a Prisma error, whatever — is treated as unexpected: the client
+gets a generic `500 INTERNAL_ERROR` with no message or stack trace from the
+original error, while the full error (including its stack) goes to
+`logger.error`, keyed by `requestId` for correlation.
+
+**Field-level errors** (`ValidationError`'s `details`) use a stable
+`{ field, message }` shape — call `toFieldErrors(zodError.issues)` rather
+than passing Zod's own issues straight through. This decouples the public
+API contract from Zod's internal issue format, which has already changed
+shape once across a major version in this project. (Log statements that
+also want the raw Zod issues, e.g. for debugging, can still log them
+directly — only the client-facing `details` needs the stable shape.)
+
 ## Device authentication
 
 Routes that a device itself calls (e.g. reading ingestion, below) are
@@ -190,14 +229,14 @@ exact field rules (ranges, formats, etc.).
 
 **Responses:**
 
-| Status | Meaning                                                                                                                                                                            |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `201`  | New reading stored. Body: `{ "readingId": "...", "status": "created", "recordedAt": "...", "receivedAt": "..." }`                                                                  |
-| `200`  | Same `readingId` already stored for this device — see "Retries and duplicates" below. Same body shape, `status: "duplicate"`.                                                      |
-| `400`  | Payload failed validation, or its `deviceId` doesn't match the authenticated device. Body includes `error.details`, an array of field-level issues (`path` + `message` per field). |
-| `401`  | Missing or invalid `X-Device-Id` / `X-Device-Key`.                                                                                                                                 |
-| `403`  | Device exists and credentials are valid, but it's disabled.                                                                                                                        |
-| `409`  | The device isn't assigned to a plant, or `readingId` is already in use by a **different** device.                                                                                  |
+| Status | Meaning                                                                                                                                |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `201`  | New reading stored. Body: `{ "readingId": "...", "status": "created", "recordedAt": "...", "receivedAt": "..." }`                      |
+| `200`  | Same `readingId` already stored for this device — see "Retries and duplicates" below. Same body shape, `status: "duplicate"`.          |
+| `400`  | Payload failed validation, or its `deviceId` doesn't match the authenticated device. See "Errors" above for the `error.details` shape. |
+| `401`  | Missing or invalid `X-Device-Id` / `X-Device-Key`.                                                                                     |
+| `403`  | Device exists and credentials are valid, but it's disabled.                                                                            |
+| `409`  | The device isn't assigned to a plant, or `readingId` is already in use by a **different** device.                                      |
 
 `recordedAt` is the device-supplied measurement time, preserved exactly as
 submitted. `receivedAt` is generated by the server at ingestion time and can
