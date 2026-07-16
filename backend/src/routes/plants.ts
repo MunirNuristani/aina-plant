@@ -1,9 +1,21 @@
 import { Router } from 'express';
 import { getLatestReadingForPlant, listReadingsForPlant } from '../services/reading-service';
+import { createPlant } from '../services/plant-service';
 import { listReadingsQuerySchema } from '../validation/reading-query';
+import { createPlantSchema } from '../validation/plant';
 import { toFieldErrors, ValidationError } from '../http/errors';
 
 export const plantsRouter = Router();
+
+plantsRouter.post('/', async (req, res) => {
+  const parsed = createPlantSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new ValidationError('Invalid plant payload', toFieldErrors(parsed.error.issues));
+  }
+
+  const plant = await createPlant(parsed.data);
+  res.status(201).json({ plant });
+});
 
 plantsRouter.get('/:plantId/readings/latest', async (req, res) => {
   const reading = await getLatestReadingForPlant(req.params.plantId);
