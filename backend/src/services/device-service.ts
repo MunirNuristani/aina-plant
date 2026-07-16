@@ -100,11 +100,15 @@ export async function authenticateDevice(
 ): Promise<PublicDevice> {
   const device = await prisma.device.findUnique({ where: { identifier } });
 
+  // Never log `credential` here or anywhere below — only the identifier,
+  // which is a lookup key, not a secret.
   if (!device || !verifyDeviceCredential(credential, device.credentialHash)) {
+    console.warn(`[device-auth] rejected identifier="${identifier}" reason="invalid credentials"`);
     throw new UnauthorizedError('Invalid device identifier or credential');
   }
 
   if (!device.enabled) {
+    console.warn(`[device-auth] rejected identifier="${identifier}" reason="device disabled"`);
     throw new ForbiddenError('Device is disabled');
   }
 

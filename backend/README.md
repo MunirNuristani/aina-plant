@@ -90,6 +90,28 @@ curl -X POST http://localhost:3000/devices/auth -H 'Content-Type: application/js
   -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
 ```
 
+## Device authentication
+
+Routes that a device itself calls (e.g. future reading-ingestion endpoints)
+are protected by `deviceAuthMiddleware` (`src/middleware/device-auth.ts`),
+which expects two headers:
+
+```
+X-Device-Id: <device identifier>
+X-Device-Key: <device credential, plaintext>
+```
+
+It looks up the device by `X-Device-Id`, verifies `X-Device-Key` against the
+stored credential hash, and rejects with `401` if either header is missing
+or the credential is wrong, `403` if the device exists but is disabled. On
+success it attaches the device to `req.device` for downstream handlers.
+Failed attempts are logged (identifier + reason only — the credential itself
+is never logged).
+
+This is distinct from `POST /devices/auth` (JSON body, used for manual
+checks like the seed script's curl example above) — the middleware is what
+real protected routes should use.
+
 ## Running the app
 
 ```bash
@@ -109,6 +131,17 @@ state.
 npm run lint
 npm run format
 ```
+
+## Testing
+
+```bash
+npm test         # run once
+npm run test:watch
+```
+
+Tests run against the local Postgres (`npm run db:up` first) using your
+`.env`. Each test creates its own uniquely-identified rows and cleans them
+up afterward, so it's safe to run alongside seeded or manually-created data.
 
 ## Troubleshooting database connectivity
 
