@@ -1,0 +1,190 @@
+import { randomUUID } from 'node:crypto';
+import request from 'supertest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createApp } from '../app';
+import { prisma } from '../db';
+import { hashDeviceCredential } from '../lib/device-credential';
+
+const app = createApp();
+const SECRET = 'reading-test-secret';
+
+let plantId: string;
+let deviceId: string;
+let deviceIdentifier: string;
+
+function validPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    readingId: randomUUID(),
+    deviceId,
+    recordedAt: '2026-07-16T10:00:00Z',
+    rawMoisture: 2048,
+    moisturePercent: 45.5,
+    firmwareVersion: '1.2.3',
+    wifiRssi: -63,
+    ...overrides,
+  };
+}
+
+function authed() {
+  return request(app)
+    .post('/api/v1/readings')
+    .set('X-Device-Id', deviceIdentifier)
+    .set('X-Device-Key', SECRET);
+}
+
+beforeEach(async () => {
+  const plant = await prisma.plant.create({ data: { name: 'Reading Test Plant' } });
+  plantId = plant.id;
+
+  deviceIdentifier = `test-reading-device-${randomUUID()}`;
+  const device = await prisma.device.create({
+    data: {
+      name: 'Reading Test Device',
+      identifier: deviceIdentifier,
+      credentialHash: hashDeviceCredential(SECRET),
+      enabled: true,
+      plantId,
+    },
+  });
+  deviceId = device.id;
+});
+
+afterEach(async () => {
+  await prisma.sensorReading.deleteMany({ where: { plantId } });
+  await prisma.device.deleteMany({ where: { plantId } });
+  await prisma.plant.deleteMany({ where: { id: plantId } });
+});
+
+afterAll(async () => {
+  await prisma.$disconnect();
+});
+
+describe('POST /api/v1/readings', () => {
+  it('returns 201 and creates a new reading', async () => {
+    const payload = validPayload();
+    const res = await authed().send(payload);
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ readingId: payload.readingId, status: 'created' });
+
+    const stored = await prisma.sensorReading.findUnique({ where: { id: payload.readingId } });
+    expect(stored).not.toBeNull();
+    expect(stored?.rawMoisture).toBe(2048);
+    expect(stored?.plantId).toBe(plantId);
+  });
+
+  it('updates the device lastSeenAt on ingestion', async () => {
+    await authed().send(validPayload());
+    const device = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
+    expect(device.lastSeenAt).not.toBeNull();
+  });
+
+  it('does not create a duplicate record on retry with the same readingId', async () => {
+    const payload = validPayload();
+
+    const first = await authed().send(payload);
+    expect(first.status).toBe(201);
+    expect(first.body.status).toBe('created');
+
+    const second = await authed().send(payload);
+    expect(second.status).toBe(200);
+    expect(second.body.status).toBe('duplicate');
+    expect(second.body.readingId).toBe(payload.readingId);
+
+    const count = await prisma.sensorReading.count({ where: { id: payload.readingId } });
+    expect(count).toBe(1);
+  });
+
+  it('returns 401 when auth headers are missing', async () => {
+    const res = await request(app).post('/api/v1/readings').send(validPayload());
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 for an invalid credential', async () => {
+    const res = await request(app)
+      .post('/api/v1/readings')
+      .set('X-Device-Id', deviceIdentifier)
+      .set('X-Device-Key', 'wrong-secret')
+      .send(validPayload());
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 403 for a disabled device', async () => {
+    await prisma.device.update({ where: { id: deviceId }, data: { enabled: false } });
+    const res = await authed().send(validPayload());
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 400 with field-level details for an out-of-range value', async () => {
+    const res = await authed().send(validPayload({ moisturePercent: 150 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: ['moisturePercent'] })]),
+    );
+  });
+
+  it('returns 400 for a missing required field', async () => {
+    const payload = validPayload();
+    delete (payload as Record<string, unknown>).rawMoisture;
+
+    const res = await authed().send(payload);
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ path: ['rawMoisture'] })]),
+    );
+  });
+
+  it('rejects a payload whose deviceId does not match the authenticated device', async () => {
+    const res = await authed().send(validPayload({ deviceId: randomUUID() }));
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects ingestion when the device is not assigned to a plant', async () => {
+    const unassignedIdentifier = `test-unassigned-${randomUUID()}`;
+    const unassignedDevice = await prisma.device.create({
+      data: {
+        name: 'Unassigned Device',
+        identifier: unassignedIdentifier,
+        credentialHash: hashDeviceCredential(SECRET),
+        enabled: true,
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/v1/readings')
+      .set('X-Device-Id', unassignedIdentifier)
+      .set('X-Device-Key', SECRET)
+      .send(validPayload({ deviceId: unassignedDevice.id }));
+
+    expect(res.status).toBe(409);
+
+    await prisma.device.deleteMany({ where: { id: unassignedDevice.id } });
+  });
+
+  it('rejects a readingId already used by a different device', async () => {
+    const payload = validPayload();
+    const firstRes = await authed().send(payload);
+    expect(firstRes.status).toBe(201);
+
+    const otherIdentifier = `test-other-device-${randomUUID()}`;
+    const otherDevice = await prisma.device.create({
+      data: {
+        name: 'Other Device',
+        identifier: otherIdentifier,
+        credentialHash: hashDeviceCredential(SECRET),
+        enabled: true,
+        plantId,
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/v1/readings')
+      .set('X-Device-Id', otherIdentifier)
+      .set('X-Device-Key', SECRET)
+      .send(validPayload({ readingId: payload.readingId, deviceId: otherDevice.id }));
+
+    expect(res.status).toBe(409);
+
+    await prisma.device.deleteMany({ where: { id: otherDevice.id } });
+  });
+});

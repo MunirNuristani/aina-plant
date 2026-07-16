@@ -1,5 +1,6 @@
 import express, { Application, NextFunction, Request, Response } from 'express';
 import { devicesRouter } from './routes/devices';
+import { readingsRouter } from './routes/readings';
 import { AppError } from './http/errors';
 
 export function createApp(): Application {
@@ -12,6 +13,7 @@ export function createApp(): Application {
   });
 
   app.use('/devices', devicesRouter);
+  app.use('/api/v1/readings', readingsRouter);
 
   app.use((_req, res) => {
     res.status(404).json({ error: { message: 'Not found' } });

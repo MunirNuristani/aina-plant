@@ -1,6 +1,7 @@
 import { prisma } from '../db';
-import { Prisma, type Device } from '../generated/prisma/client';
+import type { Device } from '../generated/prisma/client';
 import { generateDeviceCredential, verifyDeviceCredential } from '../lib/device-credential';
+import { isUniqueConstraintViolation } from '../lib/prisma-errors';
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from '../http/errors';
 import type { CreateDeviceInput, UpdateDeviceConfigInput } from '../validation/device';
 
@@ -11,10 +12,6 @@ export type PublicDevice = Omit<Device, 'credentialHash'>;
 function toPublicDevice(device: Device): PublicDevice {
   const { credentialHash: _credentialHash, ...publicDevice } = device;
   return publicDevice;
-}
-
-function isUniqueConstraintViolation(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 }
 
 export async function registerDevice(
