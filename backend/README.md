@@ -392,6 +392,43 @@ the server can recognize the retry:
   completely untouched. A `readingId` can never be used to overwrite another
   device's reading.
 
+### Device simulator
+
+`scripts/simulate-device.ts` exercises the full ingestion pipeline —
+authenticate, submit a reading, optionally replay it, retrieve it back —
+without needing a physical ESP32.
+
+```bash
+npm run simulate                    # authenticate, submit one reading, retrieve it back
+npm run simulate -- --replay        # also resubmit the same reading (expect status: "duplicate")
+npm run simulate -- --reading-id <uuid>              # reuse a specific reading ID
+npm run simulate -- --raw-moisture 3000 --moisture-percent 80.5  # override the sensor values
+```
+
+Configuration is read from environment variables, never hardcoded:
+
+| Variable               | Default                                              |
+| ---------------------- | ---------------------------------------------------- |
+| `SIMULATOR_API_URL`    | `http://localhost:3000`                              |
+| `SIMULATOR_DEVICE_ID`  | `dev-seed-device-001` (the seed device's identifier) |
+| `SIMULATOR_DEVICE_KEY` | the seed device's dev-only credential                |
+
+The defaults point at the seeded device (see "Seeding" above) purely for
+convenience — that credential is already documented everywhere else in this
+README as development-only, never a real secret. Point the script at a real
+device by overriding all three, e.g.:
+
+```bash
+SIMULATOR_API_URL=https://staging.example.com \
+SIMULATOR_DEVICE_ID=my-real-device \
+SIMULATOR_DEVICE_KEY=the-real-credential \
+npm run simulate
+```
+
+The script prints the request it sent and the full JSON response at every
+step, and exits with a nonzero status if authentication or submission
+fails — safe to use in a shell script or CI smoke test.
+
 ## Latest reading
 
 `GET /api/v1/plants/:plantId/readings/latest` is how the dashboard fetches a
