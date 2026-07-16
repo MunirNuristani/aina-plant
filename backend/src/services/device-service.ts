@@ -2,6 +2,7 @@ import { prisma } from '../db';
 import type { Device } from '../generated/prisma/client';
 import { generateDeviceCredential, verifyDeviceCredential } from '../lib/device-credential';
 import { isUniqueConstraintViolation } from '../lib/prisma-errors';
+import { logger } from '../lib/logger';
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError } from '../http/errors';
 import type { CreateDeviceInput, UpdateDeviceConfigInput } from '../validation/device';
 
@@ -100,12 +101,12 @@ export async function authenticateDevice(
   // Never log `credential` here or anywhere below — only the identifier,
   // which is a lookup key, not a secret.
   if (!device || !verifyDeviceCredential(credential, device.credentialHash)) {
-    console.warn(`[device-auth] rejected identifier="${identifier}" reason="invalid credentials"`);
+    logger.warn(`[device-auth] rejected identifier="${identifier}" reason="invalid credentials"`);
     throw new UnauthorizedError('Invalid device identifier or credential');
   }
 
   if (!device.enabled) {
-    console.warn(`[device-auth] rejected identifier="${identifier}" reason="device disabled"`);
+    logger.warn(`[device-auth] rejected identifier="${identifier}" reason="device disabled"`);
     throw new ForbiddenError('Device is disabled');
   }
 
