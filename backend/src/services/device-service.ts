@@ -58,6 +58,34 @@ export async function updateDeviceConfig(
   return toPublicDevice(device);
 }
 
+// Issues a new credential for an existing device, without touching its id,
+// identifier, plant assignment, or anything else -- the only thing that
+// changes is credentialHash. This is the rotation "path": if a device's
+// key is ever suspected compromised, or a device needs its secret
+// reprovisioned, this replaces it in place rather than needing the device
+// deleted and re-registered (which would mint a new id and break its
+// SensorReading history's deviceId references).
+//
+// Like registerDevice(), the plaintext secret is returned exactly once,
+// here, and never persisted -- only its hash is stored.
+export async function rotateDeviceCredential(
+  deviceId: string,
+): Promise<{ device: PublicDevice; credential: string }> {
+  const existing = await prisma.device.findUnique({ where: { id: deviceId } });
+  if (!existing) {
+    throw new NotFoundError('Device not found');
+  }
+
+  const { secret, hash } = generateDeviceCredential();
+
+  const device = await prisma.device.update({
+    where: { id: deviceId },
+    data: { credentialHash: hash },
+  });
+
+  return { device: toPublicDevice(device), credential: secret };
+}
+
 export async function assignDeviceToPlant(
   deviceId: string,
   plantId: string,
