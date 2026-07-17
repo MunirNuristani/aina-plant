@@ -24,8 +24,9 @@ model Plant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  devices  Device[]
-  readings SensorReading[]
+  devices    Device[]
+  readings   SensorReading[]
+  careEvents CareEvent[]
 }
 
 model Device {
@@ -94,4 +95,56 @@ model Calibration {
   createdAt   DateTime @default(now()) @db.Timestamptz(3)
 
   @@index([deviceId, effectiveAt])
+}
+
+// A fixed vocabulary of manual care actions a user can log against a
+// plant. Only WATERING exists for now (the only type this ticket asks
+// for) -- a Postgres enum, not a free-text field, since this genuinely is
+// a closed set the application controls, not open-ended user text (unlike
+// e.g. CareEvent.unit below). Adding a new type later is a plain
+// `ALTER TYPE ... ADD VALUE` migration, not a rewrite.
+enum CareEventType {
+  WATERING
+}
+
+// A manually logged care action (currently just watering), kept so it can
+// be compared against a plant's SensorReading moisture history -- e.g.
+// "did watering actually raise soil moisture, and by how much."
+model CareEvent {
+  id   String        @id @default(uuid())
+  type CareEventType
+
+  plantId String
+  plant   Plant  @relation(fields: [plantId], references: [id])
+
+  // When the care action actually happened (the user may log it after
+  // the fact, or backdate it) -- distinct from createdAt (when this row
+  // was inserted), mirroring SensorReading's recordedAt/receivedAt
+  // split. Comparisons against moisture history must use occurredAt, not
+  // createdAt.
+  occurredAt DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  // How much was used (e.g. 250) and in what unit (e.g. "ml", "oz",
+  // "cups") -- both optional, and free text for unit rather than an enum
+  // (unlike CareEventType above): there's no fixed, closed set of
+  // watering units worth enforcing at the schema level. amount >= 0 is
+  // enforced by a hand-added CHECK constraint (see the migration) --
+  // mirrors SensorReading.moisturePercent's existing DB-level range
+  // check, and backs the application-level (zod) validation a future
+  // care-event-creation endpoint ticket adds.
+  amount Float?
+  unit   String?
+  notes  String?
+
+  // Soft delete: a non-null deletedAt hides this event from normal reads
+  // while preserving the row itself -- care events feed into historical
+  // moisture comparisons, so actually deleting one would silently rewrite
+  // that history. Prisma has no declarative "always exclude soft-deleted
+  // rows" mechanism, so every read query against this model must
+  // explicitly filter `deletedAt: null`; this comment is that discipline
+  // documented at the source, for whoever writes those queries next.
+  deletedAt DateTime? @db.Timestamptz(3)
+
+  @@index([plantId, occurredAt])
 }
