@@ -498,6 +498,315 @@ describe('POST /api/v1/plants/:plantId/device', () => {
   });
 });
 
+describe('care events (POST/GET/PATCH/DELETE /api/v1/plants/:plantId/care-events)', () => {
+  const createdPlantIds: string[] = [];
+
+  afterEach(async () => {
+    if (createdPlantIds.length > 0) {
+      // Cascades to the plant's care events too -- CareEvent has no
+      // ON DELETE CASCADE (matches SensorReading's RESTRICT), so they're
+      // cleaned up explicitly first.
+      await prisma.careEvent.deleteMany({ where: { plantId: { in: createdPlantIds } } });
+      await prisma.plant.deleteMany({ where: { id: { in: createdPlantIds } } });
+      createdPlantIds.length = 0;
+    }
+  });
+
+  async function createTestPlant(overrides: Partial<Record<string, unknown>> = {}) {
+    const plant = await prisma.plant.create({
+      data: { name: 'Care Event Test Plant', ...overrides },
+    });
+    createdPlantIds.push(plant.id);
+    return plant;
+  }
+
+  function createEvent(plantId: string, body: unknown) {
+    return request(app).post(`/api/v1/plants/${plantId}/care-events`).send(body);
+  }
+  function listEvents(plantId: string) {
+    return request(app).get(`/api/v1/plants/${plantId}/care-events`);
+  }
+  function updateEvent(plantId: string, careEventId: string, body: unknown) {
+    return request(app).patch(`/api/v1/plants/${plantId}/care-events/${careEventId}`).send(body);
+  }
+  function deleteEvent(plantId: string, careEventId: string) {
+    return request(app).delete(`/api/v1/plants/${plantId}/care-events/${careEventId}`);
+  }
+
+  describe('create', () => {
+    it('creates a watering event and returns 201 with the full record', async () => {
+      const plant = await createTestPlant();
+
+      const res = await createEvent(plant.id, {
+        type: 'WATERING',
+        occurredAt: '2026-01-01T12:00:00Z',
+        amount: 250,
+        unit: 'ml',
+        notes: 'morning watering',
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body.careEvent).toMatchObject({
+        plantId: plant.id,
+        type: 'WATERING',
+        amount: 250,
+        unit: 'ml',
+        notes: 'morning watering',
+      });
+      expect(res.body.careEvent.occurredAt).toBe('2026-01-01T12:00:00.000Z');
+      expect(res.body.careEvent.deletedAt).toBeNull();
+    });
+
+    it('defaults occurredAt to now when omitted', async () => {
+      const plant = await createTestPlant();
+      const before = Date.now();
+
+      const res = await createEvent(plant.id, { type: 'WATERING' });
+      const after = Date.now();
+
+      expect(res.status).toBe(201);
+      const occurredAtMs = new Date(res.body.careEvent.occurredAt).getTime();
+      expect(occurredAtMs).toBeGreaterThanOrEqual(before);
+      expect(occurredAtMs).toBeLessThanOrEqual(after);
+    });
+
+    it('creates an event with only the required type -- amount, unit, notes all optional', async () => {
+      const plant = await createTestPlant();
+
+      const res = await createEvent(plant.id, { type: 'WATERING' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.careEvent.amount).toBeNull();
+      expect(res.body.careEvent.unit).toBeNull();
+      expect(res.body.careEvent.notes).toBeNull();
+    });
+
+    it('rejects a missing type with a standard-format field error', async () => {
+      const plant = await createTestPlant();
+      const res = await createEvent(plant.id, {});
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'type' })]),
+      );
+    });
+
+    it('rejects an unsupported event type', async () => {
+      const plant = await createTestPlant();
+      const res = await createEvent(plant.id, { type: 'FERTILIZING' });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a negative amount', async () => {
+      const plant = await createTestPlant();
+      const res = await createEvent(plant.id, { type: 'WATERING', amount: -50 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error.details).toEqual(
+        expect.arrayContaining([expect.objectContaining({ field: 'amount' })]),
+      );
+    });
+
+    it('accepts a zero amount', async () => {
+      const plant = await createTestPlant();
+      const res = await createEvent(plant.id, { type: 'WATERING', amount: 0 });
+      expect(res.status).toBe(201);
+    });
+
+    it('rejects a nonexistent plant with 404', async () => {
+      const res = await createEvent(randomUUID(), { type: 'WATERING' });
+      expect(res.status).toBe(404);
+    });
+
+    it('does not create an event when validation fails', async () => {
+      const plant = await createTestPlant();
+      await createEvent(plant.id, { type: 'WATERING', amount: -1 });
+
+      const count = await prisma.careEvent.count({ where: { plantId: plant.id } });
+      expect(count).toBe(0);
+    });
+  });
+
+  describe('list', () => {
+    it('returns events for a plant, newest occurredAt first', async () => {
+      const plant = await createTestPlant();
+      const older = await createEvent(plant.id, {
+        type: 'WATERING',
+        occurredAt: '2026-01-01T00:00:00Z',
+      });
+      const newer = await createEvent(plant.id, {
+        type: 'WATERING',
+        occurredAt: '2026-01-03T00:00:00Z',
+      });
+
+      const res = await listEvents(plant.id);
+
+      expect(res.status).toBe(200);
+      expect(res.body.careEvents.map((e: { id: string }) => e.id)).toEqual([
+        newer.body.careEvent.id,
+        older.body.careEvent.id,
+      ]);
+    });
+
+    it('returns an empty list for a plant with no events', async () => {
+      const plant = await createTestPlant();
+      const res = await listEvents(plant.id);
+
+      expect(res.status).toBe(200);
+      expect(res.body.careEvents).toEqual([]);
+    });
+
+    it('excludes soft-deleted events', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING' });
+
+      await deleteEvent(plant.id, created.body.careEvent.id);
+
+      const res = await listEvents(plant.id);
+      expect(res.body.careEvents).toEqual([]);
+    });
+
+    it('returns 404 for a nonexistent plant', async () => {
+      const res = await listEvents(randomUUID());
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('update', () => {
+    it('updates an event and returns the full updated record', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, {
+        type: 'WATERING',
+        amount: 100,
+        unit: 'ml',
+      });
+
+      const res = await updateEvent(plant.id, created.body.careEvent.id, {
+        amount: 300,
+        notes: 'topped up',
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body.careEvent).toMatchObject({
+        id: created.body.careEvent.id,
+        amount: 300,
+        unit: 'ml',
+        notes: 'topped up',
+      });
+    });
+
+    it('persists the update', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING', amount: 100 });
+
+      await updateEvent(plant.id, created.body.careEvent.id, { amount: 200 });
+
+      const stored = await prisma.careEvent.findUniqueOrThrow({
+        where: { id: created.body.careEvent.id },
+      });
+      expect(stored.amount).toBe(200);
+    });
+
+    it('rejects an empty update payload', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING' });
+
+      const res = await updateEvent(plant.id, created.body.careEvent.id, {});
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects a negative amount', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING' });
+
+      const res = await updateEvent(plant.id, created.body.careEvent.id, { amount: -10 });
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 for a nonexistent event', async () => {
+      const plant = await createTestPlant();
+      const res = await updateEvent(plant.id, randomUUID(), { amount: 50 });
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 404 when the event belongs to a different plant', async () => {
+      const plantA = await createTestPlant({ name: 'Plant A' });
+      const plantB = await createTestPlant({ name: 'Plant B' });
+      const created = await createEvent(plantA.id, { type: 'WATERING' });
+
+      const res = await updateEvent(plantB.id, created.body.careEvent.id, { amount: 50 });
+      expect(res.status).toBe(404);
+
+      // The event itself must be untouched by the mismatched-plant attempt.
+      const stored = await prisma.careEvent.findUniqueOrThrow({
+        where: { id: created.body.careEvent.id },
+      });
+      expect(stored.amount).toBeNull();
+    });
+
+    it('returns 404 when updating an already soft-deleted event', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING' });
+      await deleteEvent(plant.id, created.body.careEvent.id);
+
+      const res = await updateEvent(plant.id, created.body.careEvent.id, { amount: 50 });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('delete', () => {
+    it('soft-deletes an event and returns 204', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING' });
+
+      const res = await deleteEvent(plant.id, created.body.careEvent.id);
+      expect(res.status).toBe(204);
+    });
+
+    it('keeps the row in the database with deletedAt set, rather than removing it', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING' });
+
+      await deleteEvent(plant.id, created.body.careEvent.id);
+
+      const stored = await prisma.careEvent.findUnique({
+        where: { id: created.body.careEvent.id },
+      });
+      expect(stored).not.toBeNull();
+      expect(stored?.deletedAt).not.toBeNull();
+    });
+
+    it('returns 404 for a nonexistent event', async () => {
+      const plant = await createTestPlant();
+      const res = await deleteEvent(plant.id, randomUUID());
+      expect(res.status).toBe(404);
+    });
+
+    it('returns 404 when the event belongs to a different plant', async () => {
+      const plantA = await createTestPlant({ name: 'Plant A' });
+      const plantB = await createTestPlant({ name: 'Plant B' });
+      const created = await createEvent(plantA.id, { type: 'WATERING' });
+
+      const res = await deleteEvent(plantB.id, created.body.careEvent.id);
+      expect(res.status).toBe(404);
+
+      const stored = await prisma.careEvent.findUniqueOrThrow({
+        where: { id: created.body.careEvent.id },
+      });
+      expect(stored.deletedAt).toBeNull();
+    });
+
+    it('returns 404 when deleting an already-deleted event (not idempotent-success)', async () => {
+      const plant = await createTestPlant();
+      const created = await createEvent(plant.id, { type: 'WATERING' });
+      await deleteEvent(plant.id, created.body.careEvent.id);
+
+      const res = await deleteEvent(plant.id, created.body.careEvent.id);
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
 describe('GET /api/v1/plants/:plantId/readings/latest', () => {
   it('returns 404 for a nonexistent plant', async () => {
     const res = await request(app).get(`/api/v1/plants/${randomUUID()}/readings/latest`);

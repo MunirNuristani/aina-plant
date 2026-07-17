@@ -2,8 +2,15 @@ import { Router } from 'express';
 import { getLatestReadingForPlant, listReadingsForPlant } from '../services/reading-service';
 import { createPlant, getPlantById, listPlants } from '../services/plant-service';
 import { assignDeviceToPlant } from '../services/device-service';
+import {
+  createCareEvent,
+  deleteCareEvent,
+  listCareEventsForPlant,
+  updateCareEvent,
+} from '../services/care-event-service';
 import { listReadingsQuerySchema } from '../validation/reading-query';
 import { createPlantSchema, assignPlantDeviceSchema } from '../validation/plant';
+import { createCareEventSchema, updateCareEventSchema } from '../validation/care-event';
 import { toFieldErrors, ValidationError } from '../http/errors';
 
 export const plantsRouter = Router();
@@ -69,4 +76,37 @@ plantsRouter.get('/:plantId/readings', async (req, res) => {
   });
 
   res.status(200).json({ readings });
+});
+
+plantsRouter.post('/:plantId/care-events', async (req, res) => {
+  const parsed = createCareEventSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new ValidationError('Invalid care event payload', toFieldErrors(parsed.error.issues));
+  }
+
+  const careEvent = await createCareEvent(req.params.plantId, parsed.data);
+  res.status(201).json({ careEvent });
+});
+
+plantsRouter.get('/:plantId/care-events', async (req, res) => {
+  const careEvents = await listCareEventsForPlant(req.params.plantId);
+  res.status(200).json({ careEvents });
+});
+
+plantsRouter.patch('/:plantId/care-events/:careEventId', async (req, res) => {
+  const parsed = updateCareEventSchema.safeParse(req.body);
+  if (!parsed.success) {
+    throw new ValidationError('Invalid care event payload', toFieldErrors(parsed.error.issues));
+  }
+
+  const careEvent = await updateCareEvent(req.params.plantId, req.params.careEventId, parsed.data);
+  res.status(200).json({ careEvent });
+});
+
+// Soft delete (see CareEvent's schema comment) -- still a 204 No Content
+// response, matching standard DELETE semantics; the row itself is kept,
+// just no longer visible through the read endpoints above.
+plantsRouter.delete('/:plantId/care-events/:careEventId', async (req, res) => {
+  await deleteCareEvent(req.params.plantId, req.params.careEventId);
+  res.status(204).send();
 });
