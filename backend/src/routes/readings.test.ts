@@ -123,12 +123,46 @@ describe('POST /api/v1/readings', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns 400 with field-level details for an out-of-range value', async () => {
+  it('returns 400 with field-level details for an out-of-range percentage', async () => {
     const res = await authed().send(validPayload({ moisturePercent: 150 }));
     expect(res.status).toBe(400);
     expect(res.body.error.details).toEqual(
       expect.arrayContaining([expect.objectContaining({ field: 'moisturePercent' })]),
     );
+  });
+
+  it('returns 400 with field-level details for a raw value outside the ADC range', async () => {
+    // 4095 is the ESP32's 12-bit ADC max (see RAW_ADC_MAX in
+    // validation/reading.ts) -- 4096 is one past it.
+    const res = await authed().send(validPayload({ rawMoisture: 4096 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'rawMoisture' })]),
+    );
+  });
+
+  it('rejects a negative raw value', async () => {
+    const res = await authed().send(validPayload({ rawMoisture: -1 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'rawMoisture' })]),
+    );
+  });
+
+  it('rejects a non-integer raw value', async () => {
+    const res = await authed().send(validPayload({ rawMoisture: 2048.5 }));
+    expect(res.status).toBe(400);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ field: 'rawMoisture' })]),
+    );
+  });
+
+  it('does not create a reading when rawMoisture is invalid', async () => {
+    const payload = validPayload({ rawMoisture: 4096 });
+    await authed().send(payload);
+
+    const count = await prisma.sensorReading.count({ where: { id: payload.readingId } });
+    expect(count).toBe(0);
   });
 
   it('returns 400 for a missing required field', async () => {

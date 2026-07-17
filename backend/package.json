@@ -22,8 +22,9 @@
     "prisma:seed": "prisma db seed",
     "simulate": "tsx scripts/simulate-device.ts",
     "postinstall": "prisma generate",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "db:test:setup": "tsx scripts/setup-test-db.ts",
+    "test": "NODE_ENV=test vitest run",
+    "test:watch": "NODE_ENV=test vitest"
   },
   "keywords": [],
   "author": "Munir Nuristani",

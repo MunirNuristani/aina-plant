@@ -516,23 +516,44 @@ npm run format
 Tests use [Vitest](https://vitest.dev/), configured in `vitest.config.ts`.
 
 ```bash
-npm test         # run once — exits nonzero if anything fails, safe for CI
+npm run db:test:setup   # one-time (and re-run after adding a migration) — see below
+npm test                # run once — exits nonzero if anything fails, safe for CI
 npm run test:watch
 ```
 
-**No production credentials are ever needed.** Tests use the same `.env`
-as local development (copied from `.env.example`, see "Setup" above) —
-just the local Docker Postgres credentials and any string that satisfies
-the format checks for `JWT_SECRET`/`AI_API_KEY`. Nothing talks to a real
-external service.
+### Isolated test database
+
+Tests run against their own database (`aina_plant_test`), never the one
+local development uses (`aina_plant`) — `npm test` and `npm run test:watch`
+both set `NODE_ENV=test`, which makes `src/config/index.ts` load
+`.env.test` instead of `.env` (see that file's own comment). Both
+databases live on the same local Postgres instance (same
+`docker compose up -d` container, just a second database inside it), so
+no second container or port is needed.
+
+`npm run db:test:setup` (see `scripts/setup-test-db.ts`) creates
+`aina_plant_test` if it doesn't exist yet and applies every migration to
+it — run it once after `npm run db:up`, and again any time a new migration
+is added. It's safe to re-run at any time; it skips creation if the
+database already exists.
+
+**`.env.test` is committed**, unlike `.env` — every value in it is a
+dummy, test-only placeholder (there's a real, working `DATABASE_URL` in
+it, but it points at the isolated test database, never anything that
+matters), so there's nothing in it worth keeping secret. Don't point its
+`DATABASE_URL` at the same database `.env` uses.
 
 Most tests exercise real HTTP routes and Postgres queries end-to-end (no
-mocking), so `npm run db:up` needs to be running first. Each such test
-creates its own uniquely-identified rows and cleans them up afterward, so
-it's safe to run alongside seeded or manually-created data. Some tests need
-no database at all — e.g. `src/lib/device-credential.test.ts` is a
-self-contained example covering pure functions with zero setup; try
-running just that file with Postgres stopped to see the difference:
+mocking) against `aina_plant_test`. Each such test creates its own
+uniquely-identified rows and cleans them up afterward in an `afterEach` —
+this matters even with an isolated database, since many test files run
+concurrently against the same one and a `deleteMany` scoped too broadly
+can delete another file's in-flight rows (this has happened before; keep
+cleanup filters as specific as the rows a given test actually created, not
+a broad shared prefix). Some tests need no database at all — e.g.
+`src/lib/device-credential.test.ts` is a self-contained example covering
+pure functions with zero setup; try running just that file with Postgres
+stopped to see the difference:
 
 ```bash
 npm run db:down
