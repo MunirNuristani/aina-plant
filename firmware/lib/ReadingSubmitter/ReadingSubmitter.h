@@ -5,22 +5,29 @@
 #include "ReadingSubmitOutcome.h"
 
 // Sends an already-serialized reading (see FirmwareReading.h /
-// serializeFirmwareReading()) to the backend's POST /api/v1/readings over
-// HTTP, with the X-Device-Id / X-Device-Key headers the backend's
-// deviceAuthMiddleware requires (see
-// backend/src/middleware/device-auth.ts).
+// serializeFirmwareReading()) to the backend's POST /api/v1/readings, with
+// the X-Device-Id / X-Device-Key headers the backend's deviceAuthMiddleware
+// requires (see backend/src/middleware/device-auth.ts).
 //
-// Deliberately plain HTTP, not HTTPS: this targets the backend running on
-// the local network during development (see firmware/README.md's "Local
-// network address setup" section), not a deployed production API — a
-// production deployment would need an https:// apiUrl plus the
-// corresponding WiFiClientSecure/certificate setup, which is out of scope
-// here.
+// Supports both plain HTTP and HTTPS, chosen by apiUrl's scheme (see
+// submit()) -- HTTP for a backend on the local network during development
+// (see firmware/README.md's "Local network address setup" section), HTTPS
+// for a deployed production API (see docs/DEPLOYMENT.md), which is what a
+// real ESP32 out on Wi-Fi rather than your dev LAN needs, since that's the
+// only thing a PaaS host like Render exposes publicly. The HTTPS path uses
+// WiFiClientSecure::setInsecure() -- the connection is encrypted but the
+// server's certificate isn't verified, so this doesn't protect against a
+// MITM on the network path. Acceptable for this project (no data more
+// sensitive than a revocable device credential and soil moisture
+// readings); real certificate pinning via setCACert() is the upgrade path
+// if that trade-off ever stops being acceptable.
 class ReadingSubmitter {
 public:
-  // apiUrl: full URL of the readings endpoint, e.g.
-  //   "http://192.168.1.42:3000/api/v1/readings" — see
-  //   firmware/README.md for how to find your machine's LAN address.
+  // apiUrl: full URL of the readings endpoint, either
+  //   "http://192.168.1.42:3000/api/v1/readings" (local -- see
+  //   firmware/README.md for how to find your machine's LAN address) or
+  //   "https://your-app.onrender.com/api/v1/readings" (deployed -- see
+  //   docs/DEPLOYMENT.md).
   // deviceIdentifier/deviceKey: this device's auth credentials — the
   //   *identifier* (goes in the X-Device-Id header), not its
   //   server-assigned deviceId (which goes in the JSON body instead —

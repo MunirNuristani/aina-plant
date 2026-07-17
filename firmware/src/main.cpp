@@ -54,29 +54,42 @@ constexpr const char* WIFI_PASSWORD = "YOUR_PASSWORD";
 // (POST /api/v1/devices). This is deliberately NOT the same value as
 // whatever identifier the device authenticates with (X-Device-Id) — see
 // FirmwareReading.h's deviceId field comment for why they differ.
-constexpr const char* DEVICE_ID = "00000000-0000-0000-0000-000000000000";
+constexpr const char* DEVICE_ID = "96206942-1c65-44df-91d4-a488b2c15191";
 constexpr const char* FIRMWARE_VERSION = "1.0.0";
 
-// Where the backend's readings endpoint lives. Points at the machine
-// running the backend on your local network -- NOT "localhost", which
-// from the ESP32's point of view means the ESP32 itself, and NOT the
-// deployed production API (this module speaks plain HTTP, not HTTPS --
-// see ReadingSubmitter.h). See firmware/README.md's "Local network
-// address setup" section for how to find your machine's LAN IP and why
-// port 3000 (the backend's default -- see backend/.env.example) must be
-// reachable from the ESP32.
-constexpr const char* API_URL = "http://YOUR_LAN_IP:3000/api/v1/readings";
+// Where the backend's readings endpoint lives. ReadingSubmitter picks
+// plain HTTP or HTTPS based on this URL's scheme (see
+// ReadingSubmitter.h), so either of these work:
+//   - Local: "http://YOUR_LAN_IP:3000/api/v1/readings" -- points at the
+//     machine running the backend on your local network. NOT "localhost",
+//     which from the ESP32's point of view means the ESP32 itself. See
+//     firmware/README.md's "Local network address setup" section for how
+//     to find your machine's LAN IP and why port 3000 (the backend's
+//     default -- see backend/.env.example) must be reachable from the
+//     ESP32.
+//   - Deployed: "https://<your-app>.onrender.com/api/v1/readings" -- see
+//     docs/DEPLOYMENT.md. Currently set to this project's own deployment.
+constexpr const char* API_URL = "https://aina-plant.onrender.com/api/v1/readings";
 
 // This device's auth credentials for the X-Device-Id / X-Device-Key
 // headers -- the *identifier* (a human-chosen string), not the DEVICE_ID
 // UUID above (see FirmwareReading.h's deviceId comment for why they
-// differ). These particular values match backend/prisma/seed.ts's
-// development fixture device -- convenient for local testing against a
-// freshly seeded backend, but still just a placeholder: a real deployment
-// needs its own registered device (POST /api/v1/devices) and its own
-// generated credential, never this one.
-constexpr const char* DEVICE_IDENTIFIER = "dev-seed-device-001";
-constexpr const char* DEVICE_KEY = "dev-only-seed-credential-do-not-use-in-production";
+// differ). DEVICE_IDENTIFIER isn't a secret (it's sent in a plain header,
+// same idea as a username -- see the seed fixture's identifier below,
+// also committed in plaintext), so it's safe to commit here; it's a real
+// device already registered against the deployed backend and assigned to
+// a plant (POST /api/v1/devices, POST /api/v1/plants/:plantId/device --
+// see docs/DEPLOYMENT.md's Part 3). DEVICE_KEY *is* the secret half of
+// that pair, same treatment as WIFI_PASSWORD above: fill it in locally
+// with the credential you got back from registering the device, never
+// commit a real value here.
+//
+// backend/prisma/seed.ts's fixture device (dev-seed-device-001) is a
+// different, intentionally-public dev-only credential for local testing
+// against a freshly seeded local backend -- see "Testing against the
+// seeded dev device" in firmware/README.md.
+constexpr const char* DEVICE_IDENTIFIER = "esp32-balcony-01";
+constexpr const char* DEVICE_KEY = "YOUR_DEVICE_KEY";
 
 // Anything before this means the ESP32's clock hasn't received NTP time
 // yet (it boots at epoch 0) — used to detect "not synced" rather than

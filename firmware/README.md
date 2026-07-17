@@ -298,11 +298,19 @@ deployment would need an `https://` `API_URL` plus a
 
 ### Local network address setup
 
+`main.cpp`'s `API_URL` currently points at this project's deployed backend
+(`https://aina-plant.onrender.com/api/v1/readings` — see
+`docs/DEPLOYMENT.md`), which works from anywhere with Wi-Fi, not just your
+dev LAN. `ReadingSubmitter` picks plain HTTP or HTTPS automatically based
+on `API_URL`'s scheme (see `ReadingSubmitter.h`), so pointing it at a local
+backend instead — e.g. while iterating on backend code and wanting faster
+feedback than a redeploy — still works. To do that:
+
 The ESP32 can't reach the backend at `localhost` — from the ESP32's point
-of view, `localhost` means the ESP32 itself. `main.cpp`'s `API_URL`
-constant must instead point at your development machine's **LAN IP
-address**, and both devices must be on the same network (e.g. the ESP32
-joined to the same Wi-Fi network your machine is on/near).
+of view, `localhost` means the ESP32 itself. `API_URL` must instead point
+at your development machine's **LAN IP address**, and both devices must be
+on the same network (e.g. the ESP32 joined to the same Wi-Fi network your
+machine is on/near).
 
 1. Start the backend locally (see `backend/README.md`): `npm run db:up`,
    then `npm run dev`. Note the port it logs (`backend/.env`'s `PORT`,
@@ -326,24 +334,32 @@ and use that port in `API_URL` instead.
 
 ### Testing against the seeded dev device
 
-`DEVICE_IDENTIFIER`/`DEVICE_KEY` in `main.cpp` default to
-`backend/prisma/seed.ts`'s fixture device (`dev-seed-device-001`) — a
-committed, intentionally-public dev-only credential, already assigned to a
-seed plant, so a freshly seeded local backend works out of the box. Only
-`API_URL` (see above) and `DEVICE_ID` need filling in:
+`main.cpp`'s compiled-in defaults point at the deployed backend and a real
+registered device (see above) — not the local seed fixture. To test
+against a freshly seeded *local* backend instead, temporarily set:
+
+- `API_URL` to your machine's LAN address (see above), not the deployed URL
+- `DEVICE_IDENTIFIER`/`DEVICE_KEY` to `backend/prisma/seed.ts`'s fixture
+  device (`dev-seed-device-001` /
+  `dev-only-seed-credential-do-not-use-in-production`) — a committed,
+  intentionally-public dev-only credential, already assigned to a seed
+  plant, so a freshly seeded local backend works out of the box
+
+Only `DEVICE_ID` needs filling in separately:
 
 ```bash
 # After seeding (npm run prisma:seed), look up the seed device's real
 # Device.id (a UUID) — this is what main.cpp's DEVICE_ID constant needs,
 # NOT the identifier string above (see "deviceId vs. the X-Device-Id
 # header" above for why they're different fields):
-curl -X POST http://localhost:3000/devices/auth \
+curl -X POST http://localhost:3000/api/v1/devices/auth \
   -H 'Content-Type: application/json' \
   -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
 ```
 
-A real deployment must never use this seed credential — register a real
-device (`POST /api/v1/devices`) and use its generated credential instead.
+Don't commit that swap — revert `API_URL`/`DEVICE_IDENTIFIER`/`DEVICE_KEY`
+back afterward, same as you would for a temporary `WIFI_SSID`/
+`WIFI_PASSWORD` edit.
 
 ### Verifying storage in PostgreSQL
 
