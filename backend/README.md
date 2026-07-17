@@ -2,6 +2,12 @@
 
 Express + TypeScript API for the aina-plant platform.
 
+**Looking for endpoint-by-endpoint request/response reference?** See
+[`../docs/API.md`](../docs/API.md) — every implemented endpoint, its
+auth requirements, request fields, response shapes, and error cases,
+with working `curl` examples. This README covers setup, local
+development, and narrative deep-dives instead.
+
 ## Quickstart
 
 A complete, copy-pasteable walkthrough from a clean clone to submitting and
@@ -72,7 +78,7 @@ Authenticate as the seeded device to get its internal `id` (distinct from
 its `identifier`):
 
 ```bash
-curl -X POST http://localhost:3000/devices/auth \
+curl -X POST http://localhost:3000/api/v1/devices/auth \
   -H 'Content-Type: application/json' \
   -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
 ```
@@ -194,7 +200,7 @@ time you seed — it's for local testing only and is clearly labeled
 running server with the `curl` command the seed script prints, e.g.:
 
 ```bash
-curl -X POST http://localhost:3000/devices/auth -H 'Content-Type: application/json' \
+curl -X POST http://localhost:3000/api/v1/devices/auth -H 'Content-Type: application/json' \
   -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
 ```
 
@@ -308,7 +314,7 @@ directly — only the client-facing `details` needs the stable shape.)
 
 ## Health check
 
-`GET /health` reports whether the app and its database dependency are up —
+`GET /api/v1/health` reports whether the app and its database dependency are up —
 point a load balancer / orchestrator health probe at it. Unauthenticated,
 read-only (a single `SELECT 1`, via `isDatabaseHealthy()` in `src/db/index.ts`).
 
@@ -346,7 +352,7 @@ success it attaches the device to `req.device` for downstream handlers.
 Failed attempts are logged (identifier + reason only — the credential itself
 is never logged).
 
-This is distinct from `POST /devices/auth` (JSON body, used for manual
+This is distinct from `POST /api/v1/devices/auth` (JSON body, used for manual
 checks like the seed script's curl example above) — the middleware is what
 real protected routes should use.
 
