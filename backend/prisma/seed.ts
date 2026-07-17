@@ -63,7 +63,7 @@ async function main() {
   console.log('');
   console.log('Test it against the local API:');
   console.log(
-    `  curl -X POST http://localhost:3000/devices/auth -H 'Content-Type: application/json' \\\n` +
+    `  curl -X POST http://localhost:3000/api/v1/devices/auth -H 'Content-Type: application/json' \\\n` +
       `    -d '{"identifier":"${SEED_DEVICE_IDENTIFIER}","credential":"${SEED_DEVICE_CREDENTIAL}"}'`,
   );
 }

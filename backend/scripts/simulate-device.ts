@@ -48,7 +48,7 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 async function authenticate(): Promise<PublicDevice> {
-  const res = await fetch(`${API_URL}/devices/auth`, {
+  const res = await fetch(`${API_URL}/api/v1/devices/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ identifier: DEVICE_IDENTIFIER, credential: DEVICE_KEY }),

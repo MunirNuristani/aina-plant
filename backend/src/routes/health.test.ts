@@ -11,9 +11,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('GET /health', () => {
+describe('GET /api/v1/health', () => {
   it('reports healthy with a 200 when the database is reachable', async () => {
-    const res = await request(app).get('/health');
+    const res = await request(app).get('/api/v1/health');
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
@@ -29,14 +29,14 @@ describe('GET /health', () => {
     // already demonstrates this endpoint doesn't write anything. Directly:
     // the underlying check is a `SELECT 1`, and the route itself performs
     // no writes.
-    const res = await request(app).get('/health');
+    const res = await request(app).get('/api/v1/health');
     expect(res.status).toBe(200);
   });
 
   it('reports unhealthy with a 503 when the database is unreachable', async () => {
     vi.spyOn(db, 'isDatabaseHealthy').mockResolvedValue(false);
 
-    const res = await request(app).get('/health');
+    const res = await request(app).get('/api/v1/health');
 
     expect(res.status).toBe(503);
     expect(res.body).toEqual({
@@ -49,7 +49,7 @@ describe('GET /health', () => {
   it('does not expose connection details or internal error messages when unhealthy', async () => {
     vi.spyOn(db, 'isDatabaseHealthy').mockResolvedValue(false);
 
-    const res = await request(app).get('/health');
+    const res = await request(app).get('/api/v1/health');
 
     const body = JSON.stringify(res.body);
     expect(body).not.toContain('postgres://');

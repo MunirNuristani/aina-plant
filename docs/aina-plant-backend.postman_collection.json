@@ -1,0 +1,648 @@
+{
+  "info": {
+    "_postman_id": "b7e1c2a4-3f5d-4e6a-9b8c-1d2e3f4a5b6c",
+    "name": "aina-plant Backend API",
+    "description": "Every endpoint implemented by backend/ — see docs/API.md for the full written reference (auth schemes, error format, field-by-field notes). This collection is organized as a runnable end-to-end flow: Health -> Devices -> Plants -> Readings -> Care events. Requests that create a resource (Register Device, Create Plant, Submit Reading, Create Care Event) capture the returned ID into a collection variable via their Tests script, so later requests in the same run pick it up automatically -- run the whole collection top-to-bottom with the Collection Runner, or run requests individually after setting variables by hand.\n\nSet `baseUrl` (default `http://localhost:3000`) to point this at a different environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "deviceId", "value": "", "type": "string" },
+    { "key": "deviceIdentifier", "value": "", "type": "string" },
+    { "key": "deviceKey", "value": "", "type": "string" },
+    { "key": "plantId", "value": "", "type": "string" },
+    { "key": "careEventId", "value": "", "type": "string" },
+    { "key": "lastReadingId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "health"]
+            },
+            "description": "Liveness/readiness check -- confirms the server is up and can reach Postgres. No authentication. 200 when healthy, 503 when the database is unreachable (same flat body shape either way, not the standard error envelope)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status is 200 or 503', function () {",
+                  "  pm.expect([200, 503]).to.include(pm.response.code);",
+                  "});",
+                  "pm.test('Response has status/database/requestId', function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property('status');",
+                  "  pm.expect(body).to.have.property('database');",
+                  "  pm.expect(body).to.have.property('requestId');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Devices",
+      "description": "Device registration and management. No authentication on any endpoint in this folder (there is no admin-user auth layer yet -- see docs/API.md's Authentication section).",
+      "item": [
+        {
+          "name": "Register Device",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Balcony ESP32\",\n  \"identifier\": \"esp32-balcony-{{$timestamp}}\",\n  \"reportingIntervalSeconds\": 900\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devices",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "devices"]
+            },
+            "description": "Registers a new device and issues its credential. FR-DEVICE-001. The plaintext `credential` is returned exactly once, here -- only its hash is ever stored. This request's Tests script captures `device.id`, `device.identifier`, and `credential` into collection variables for every later request in this collection."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('Response has device and credential', function () {",
+                  "  pm.expect(body).to.have.property('device');",
+                  "  pm.expect(body).to.have.property('credential');",
+                  "});",
+                  "pm.collectionVariables.set('deviceId', body.device.id);",
+                  "pm.collectionVariables.set('deviceIdentifier', body.device.identifier);",
+                  "pm.collectionVariables.set('deviceKey', body.credential);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Authenticate Device",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"{{deviceIdentifier}}\",\n  \"credential\": \"{{deviceKey}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devices/auth",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "devices", "auth"]
+            },
+            "description": "Verifies a device identifier + credential pair directly, without submitting anything. Mainly for manual checks/tooling -- real device-facing endpoints (e.g. Submit Reading) use the X-Device-Id/X-Device-Key header scheme instead, not this endpoint."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns the authenticated device', function () {",
+                  "  pm.expect(pm.response.json()).to.have.property('device');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Device Config",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reportingIntervalSeconds\": 300\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devices/{{deviceId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "devices", "{{deviceId}}"]
+            },
+            "description": "Updates a device's editable configuration (name, firmwareVersion, reportingIntervalSeconds, enabled). All fields optional, but at least one is required -- an empty body is a 400."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rotate Device Credential",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devices/{{deviceId}}/rotate-credential",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "devices", "{{deviceId}}", "rotate-credential"]
+            },
+            "description": "Issues a new credential for an existing device, invalidating the old one immediately -- identity and plant assignment are untouched. This request's Tests script overwrites the `deviceKey` collection variable with the new credential, so every later request in this collection (e.g. Submit Reading) uses the rotated key."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('Returns a new credential', function () {",
+                  "  pm.expect(body).to.have.property('credential');",
+                  "});",
+                  "pm.collectionVariables.set('deviceKey', body.credential);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assign Device to Plant (device-centric)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plantId\": \"{{plantId}}\",\n  \"reassign\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/devices/{{deviceId}}/assign",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "devices", "{{deviceId}}", "assign"]
+            },
+            "description": "Assigns a device to a plant, reached from the device's URL. Identical operation to Plants > Assign Device to Plant (plant-centric) below -- kept here too for completeness against docs/API.md, which documents both URLs. Requires `plantId` to already be set (run Plants > Create Plant first). Set `reassign: true` to move a device off a *different* plant it's already assigned to (409 otherwise)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Plants",
+      "item": [
+        {
+          "name": "Create Plant",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Balcony Fern\",\n  \"location\": \"Living room window\",\n  \"potSize\": \"6in\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants"]
+            },
+            "description": "Creates a plant profile. FR-PLANT-001. Only `name` is required (1-100 chars, whitespace-only rejected); every other field is optional and may be an empty string. This request's Tests script captures `plant.id` into the `plantId` collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('Returns the created plant', function () {",
+                  "  pm.expect(body).to.have.property('plant');",
+                  "  pm.expect(body.plant).to.have.property('id');",
+                  "});",
+                  "pm.collectionVariables.set('plantId', body.plant.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Plants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants"]
+            },
+            "description": "Lists every plant. Each plant includes a `devices` array of its currently *enabled* devices only -- a disabled-but-assigned device is omitted (its plantId foreign key is untouched, just not surfaced here). Device objects never include credentialHash."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns a plants array', function () {",
+                  "  pm.expect(pm.response.json().plants).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Plant by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}"]
+            },
+            "description": "A single plant, by id. 404 if no plant has that id."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Assign Device to Plant (plant-centric)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"deviceId\": \"{{deviceId}}\",\n  \"reassign\": false\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}/device",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}", "device"]
+            },
+            "description": "Assigns the registered device to this plant, reached from the plant's URL -- same underlying operation as Devices > Assign Device to Plant (device-centric). This is the assignment call the rest of this collection's flow relies on: run this before Submit Reading below, since a reading can only be ingested for a device that's assigned to a plant (409 otherwise). FR-DEVICE-002."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Device is now assigned to this plant', function () {",
+                  "  pm.expect(pm.response.json().device.plantId).to.eql(pm.collectionVariables.get('plantId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Latest Reading for Plant",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}/readings/latest",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}", "readings", "latest"]
+            },
+            "description": "The single newest reading for a plant, by recordedAt (true measurement time, not receivedAt). `{ \"reading\": null }` if the plant has no readings yet -- not a 404, the plant exists, it just has no data. Run after Readings > Submit Reading to see a real value here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reading History for Plant",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}/readings?sort=desc&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}", "readings"],
+              "query": [
+                { "key": "sort", "value": "desc" },
+                { "key": "limit", "value": "50" },
+                { "key": "start", "value": "", "disabled": true },
+                { "key": "end", "value": "", "disabled": true }
+              ]
+            },
+            "description": "A plant's true measurement history (ordered/filterable by recordedAt), with optional start/end ISO 8601 UTC bounds -- contrast with Readings > Recent Readings, which is global and orders by receivedAt instead."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns a readings array', function () {",
+                  "  pm.expect(pm.response.json().readings).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Readings",
+      "item": [
+        {
+          "name": "Submit Reading",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Device-Id", "value": "{{deviceIdentifier}}" },
+              { "key": "X-Device-Key", "value": "{{deviceKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"readingId\": \"{{$guid}}\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"recordedAt\": \"{{$isoTimestamp}}\",\n  \"rawMoisture\": 2048,\n  \"moisturePercent\": 45.5,\n  \"firmwareVersion\": \"1.0.0\",\n  \"wifiRssi\": -60\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "readings"]
+            },
+            "description": "How a device submits one sensor reading. Device-authenticated via X-Device-Id/X-Device-Key (the device's *identifier*, not its id). FR-READING-001, FR-READING-002. Requires the device to already be assigned to a plant -- run Plants > Assign Device to Plant first, or this 409s. `readingId` is a fresh UUID (`{{$guid}}`) each time this request runs; its Tests script captures it into `lastReadingId` so the next request can resend the exact same one to demonstrate idempotent duplicate handling."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201 (created)', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('status is \"created\"', function () {",
+                  "  pm.expect(body.status).to.eql('created');",
+                  "});",
+                  "pm.collectionVariables.set('lastReadingId', body.readingId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Retry Same Reading (Duplicate Demo)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Device-Id", "value": "{{deviceIdentifier}}" },
+              { "key": "X-Device-Key", "value": "{{deviceKey}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"readingId\": \"{{lastReadingId}}\",\n  \"deviceId\": \"{{deviceId}}\",\n  \"recordedAt\": \"{{$isoTimestamp}}\",\n  \"rawMoisture\": 2048,\n  \"moisturePercent\": 45.5\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "readings"]
+            },
+            "description": "Resends the exact same `readingId` as the previous request (a device retrying after a timeout would do exactly this). Demonstrates idempotent duplicate handling: expect 200 with `status: \"duplicate\"`, the same readingId echoed back, and no second row written -- not an error. Run Submit Reading first so `lastReadingId` is set."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200 (duplicate, not an error)', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('status is \"duplicate\"', function () {",
+                  "  pm.expect(pm.response.json().status).to.eql('duplicate');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Recent Readings (Admin/Global)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/readings/recent?limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "readings", "recent"],
+              "query": [{ "key": "limit", "value": "10" }]
+            },
+            "description": "The most recent readings across *all* plants/devices -- an admin/global activity view, ordered newest-first by receivedAt, not scoped to one plant. Contrast with Plants > Reading History for Plant."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Care Events",
+      "description": "Manually logged care actions (currently just watering) for a plant. FR-CARE-001-004.",
+      "item": [
+        {
+          "name": "Create Care Event",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"WATERING\",\n  \"amount\": 250,\n  \"unit\": \"ml\",\n  \"notes\": \"morning watering\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}/care-events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}", "care-events"]
+            },
+            "description": "Logs a watering event for a plant. `occurredAt` is optional -- omit it (as this example does) to mean \"just now\". `amount` must be >= 0 (negative is rejected). This request's Tests script captures `careEvent.id` into the `careEventId` collection variable."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 201', function () {",
+                  "  pm.response.to.have.status(201);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('Returns the created care event', function () {",
+                  "  pm.expect(body).to.have.property('careEvent');",
+                  "});",
+                  "pm.collectionVariables.set('careEventId', body.careEvent.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List Care Events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}/care-events",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}", "care-events"]
+            },
+            "description": "Lists a plant's care events, newest occurredAt first. Soft-deleted events are never included."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Returns a careEvents array', function () {",
+                  "  pm.expect(pm.response.json().careEvents).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update Care Event",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 300,\n  \"notes\": \"topped up\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}/care-events/{{careEventId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}", "care-events", "{{careEventId}}"]
+            },
+            "description": "Updates a care event. All fields optional (type, occurredAt, amount, unit, notes), but at least one is required. 404 if the event doesn't exist, doesn't belong to this plant, or is already soft-deleted."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete Care Event",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/plants/{{plantId}}/care-events/{{careEventId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "plants", "{{plantId}}", "care-events", "{{careEventId}}"]
+            },
+            "description": "Soft-deletes a care event -- the row is kept (deletedAt set), never actually removed, so a plant's true watering history can't be silently rewritten. 204 No Content on success. Running this twice in a row correctly 404s the second time (not idempotent-success) -- the event is gone from the API's perspective after the first call."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status code is 204', function () {",
+                  "  pm.response.to.have.status(204);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

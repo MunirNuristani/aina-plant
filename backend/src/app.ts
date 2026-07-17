@@ -16,9 +16,9 @@ export function createApp(): Application {
 
   app.use(express.json());
 
-  app.use('/health', healthRouter);
+  app.use('/api/v1/health', healthRouter);
 
-  app.use('/devices', devicesRouter);
+  app.use('/api/v1/devices', devicesRouter);
   app.use('/api/v1/readings', readingsRouter);
   app.use('/api/v1/plants', plantsRouter);
 
