@@ -1,5 +1,5 @@
 import { apiFetch } from "./api";
-import type { Plant, SensorReading } from "./types";
+import type { CareEvent, Plant, SensorReading } from "./types";
 
 export async function getPlants(): Promise<Plant[]> {
   const res = await apiFetch("/plants", { cache: "no-store" });
@@ -61,4 +61,17 @@ export async function getReadingHistory(
 
   const data: { readings: SensorReading[] } = await res.json();
   return data.readings;
+}
+
+// Newest occurredAt first — the API's own documented ordering; no
+// client-side sort needed.
+export async function getCareEvents(plantId: string): Promise<CareEvent[]> {
+  const res = await apiFetch(`/plants/${plantId}/care-events`, { cache: "no-store" });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load care events for plant ${plantId} (${res.status})`);
+  }
+
+  const data: { careEvents: CareEvent[] } = await res.json();
+  return data.careEvents;
 }
