@@ -24,3 +24,10 @@ export function formatRelativeTime(isoDate: string): string {
 
   return relativeTimeFormatter.format(Math.round(seconds / 60), "minute");
 }
+
+export function formatDateTime(isoDate: string): string {
+  return new Date(isoDate).toLocaleString("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
