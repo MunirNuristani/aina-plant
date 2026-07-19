@@ -29,7 +29,11 @@ export function MoistureStatusCard({
         <span className="font-display text-5xl tracking-tight text-ink">
           {reading.moisturePercent.toFixed(0)}%
         </span>
-        <span className={`flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest ${copy.textClass}`}>
+        {/* Text stays a neutral ink token even for a status row — a status
+            color is only ever contrast-safe as a small mark (the dot),
+            never as text (Golden Pollen in particular fails WCAG text
+            contrast outright, ~2:1 against this surface). */}
+        <span className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-ink">
           <span className={`h-1.5 w-1.5 rounded-full ${copy.dotClass}`} aria-hidden="true" />
           {copy.label}
         </span>
@@ -37,7 +41,7 @@ export function MoistureStatusCard({
       <div className="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
         <span>Updated {formatRelativeTime(reading.recordedAt)}</span>
         {stale ? (
-          <span className="rounded-full bg-warning/10 px-2 py-0.5 font-mono text-xs uppercase tracking-widest text-warning">
+          <span className="rounded-full bg-warning/10 px-2 py-0.5 font-mono text-xs uppercase tracking-widest text-ink">
             Stale
           </span>
         ) : null}

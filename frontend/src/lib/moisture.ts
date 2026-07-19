@@ -26,10 +26,13 @@ export function moistureLevel(percent: number): MoistureLevel {
   return "needs-water";
 }
 
-export const MOISTURE_LEVEL_COPY: Record<MoistureLevel, { label: string; textClass: string; dotClass: string }> = {
-  healthy: { label: "Well watered", textClass: "text-success", dotClass: "bg-success" },
-  dry: { label: "Getting dry", textClass: "text-warning", dotClass: "bg-warning" },
-  "needs-water": { label: "Needs water", textClass: "text-error", dotClass: "bg-error" },
+// dotClass only — status color belongs on the small identity dot, never on
+// the label text (see moisture-status-card.tsx; Golden Pollen in particular
+// fails WCAG text contrast outright as text color).
+export const MOISTURE_LEVEL_COPY: Record<MoistureLevel, { label: string; dotClass: string }> = {
+  healthy: { label: "Well watered", dotClass: "bg-success" },
+  dry: { label: "Getting dry", dotClass: "bg-warning" },
+  "needs-water": { label: "Needs water", dotClass: "bg-error" },
 };
 
 // No aggregation/downsampling is performed anywhere in this module — every
