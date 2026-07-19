@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { MoistureHistoryChart } from "@/components/moisture-history-chart";
 import { MoistureStatusCard } from "@/components/moisture-status-card";
 import { TechnicalDetails } from "@/components/technical-details";
 import { DEFAULT_REPORTING_INTERVAL_SECONDS } from "@/lib/moisture";
-import { getLatestReading, getPlant } from "@/lib/plants";
+import { getLatestReading, getPlant, getReadingHistory } from "@/lib/plants";
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export default async function PlantDashboardPage({
   params,
@@ -17,9 +20,17 @@ export default async function PlantDashboardPage({
     notFound();
   }
 
-  const latestReading = await getLatestReading(plantId);
   const reportingIntervalSeconds =
     plant.devices[0]?.reportingIntervalSeconds ?? DEFAULT_REPORTING_INTERVAL_SECONDS;
+
+  // Plant existence is already confirmed above, so these can run in
+  // parallel — none of them has its own not-found path to race against.
+  const now = new Date();
+  const [latestReading, readings24h, readings7d] = await Promise.all([
+    getLatestReading(plantId),
+    getReadingHistory(plantId, { start: new Date(now.getTime() - MS_PER_DAY), end: now }),
+    getReadingHistory(plantId, { start: new Date(now.getTime() - 7 * MS_PER_DAY), end: now }),
+  ]);
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-16">
@@ -35,6 +46,11 @@ export default async function PlantDashboardPage({
       </div>
 
       <MoistureStatusCard reading={latestReading} reportingIntervalSeconds={reportingIntervalSeconds} />
+
+      <MoistureHistoryChart
+        readingsByRange={{ "24h": readings24h, "7d": readings7d }}
+        reportingIntervalSeconds={reportingIntervalSeconds}
+      />
 
       {latestReading ? <TechnicalDetails reading={latestReading} /> : null}
     </div>

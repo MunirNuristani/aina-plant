@@ -39,3 +39,26 @@ export async function getLatestReading(plantId: string): Promise<SensorReading |
   const data: { reading: SensorReading | null } = await res.json();
   return data.reading;
 }
+
+// Sorted oldest-first (sort=asc — for plotting left-to-right). Capped at the
+// API's own limit=1000 ceiling; see lib/moisture.ts's module comment for what
+// that means for high-frequency devices.
+export async function getReadingHistory(
+  plantId: string,
+  range: { start: Date; end: Date },
+): Promise<SensorReading[]> {
+  const params = new URLSearchParams({
+    start: range.start.toISOString(),
+    end: range.end.toISOString(),
+    sort: "asc",
+    limit: "1000",
+  });
+  const res = await apiFetch(`/plants/${plantId}/readings?${params}`, { cache: "no-store" });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load reading history for plant ${plantId} (${res.status})`);
+  }
+
+  const data: { readings: SensorReading[] } = await res.json();
+  return data.readings;
+}

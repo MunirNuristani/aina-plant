@@ -31,3 +31,10 @@ export function formatDateTime(isoDate: string): string {
     timeStyle: "short",
   });
 }
+
+export function formatAxisTime(timestampMs: number, range: "24h" | "7d"): string {
+  const date = new Date(timestampMs);
+  return range === "24h"
+    ? date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
