@@ -1,0 +1,11 @@
+{
+  "projectId": "7a2bec47-63a9-4875-96ae-ba0d571e191f",
+  "pkg": "frontend",
+  "globalName": "Aina",
+  "shape": "package",
+  "entry": "dist/index.js",
+  "buildCmd": "npm run build && cp .next/static/chunks/*.css .next/static/chunks/compiled-styles.css",
+  "srcDir": "src/components",
+  "cssEntry": ".next/static/chunks/compiled-styles.css",
+  "tsconfig": ".design-sync/tsconfig.sync.json"
+}

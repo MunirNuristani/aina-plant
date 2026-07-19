@@ -1,41 +1,40 @@
 @import "tailwindcss";
 
 :root {
-  --color-paper: #ece9dc;
-  --color-paper-raised: #f7f5ec;
-  --color-ink: #23281f;
-  --color-ink-muted: #6b7263;
-  --color-line: rgba(35, 40, 31, 0.14);
-  --color-verdigris: #3e7a68;
-  --color-copper: #a8683b;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-paper: #171c15;
-    --color-paper-raised: #1f251c;
-    --color-ink: #e9e7da;
-    --color-ink-muted: #97a08c;
-    --color-line: rgba(233, 231, 218, 0.14);
-    --color-verdigris: #5fa88f;
-    --color-copper: #c98452;
-  }
+  /* AINA design system — see docs for the full palette rationale. */
+  --color-background: #f5f2e9; /* Soft Linen */
+  --color-surface: #fcfcf8; /* Mist White */
+  --color-primary: #173f35; /* AINA Forest — nav, headings, buttons, logo */
+  --color-secondary: #5f7d5b; /* Moss Circuit */
+  --color-accent: #b7d83d; /* Signal Lime — active/selected states, used sparingly */
+  --color-accent-warm: #d97a52; /* Terracotta Bloom — watering events, alerts, timeline markers */
+  --color-ink: #202923; /* Deep Soil */
+  --color-ink-muted: #66736b; /* Stone Leaf */
+  --color-line: #d7ded4; /* Pale Sage */
+  --color-error: #b94a48; /* Clay Red */
+  --color-warning: #d7a928; /* Golden Pollen */
+  --color-success: #3f8b5a; /* Healthy Leaf */
 }
 
 @theme inline {
-  --color-paper: var(--color-paper);
-  --color-paper-raised: var(--color-paper-raised);
+  --color-background: var(--color-background);
+  --color-surface: var(--color-surface);
+  --color-primary: var(--color-primary);
+  --color-secondary: var(--color-secondary);
+  --color-accent: var(--color-accent);
+  --color-accent-warm: var(--color-accent-warm);
   --color-ink: var(--color-ink);
   --color-ink-muted: var(--color-ink-muted);
   --color-line: var(--color-line);
-  --color-verdigris: var(--color-verdigris);
-  --color-copper: var(--color-copper);
+  --color-error: var(--color-error);
+  --color-warning: var(--color-warning);
+  --color-success: var(--color-success);
   --font-display: var(--font-fraunces);
   --font-sans: var(--font-public-sans);
   --font-mono: var(--font-plex-mono);
 }
 
 body {
-  background: var(--color-paper);
+  background: var(--color-background);
   color: var(--color-ink);
 }
