@@ -29,12 +29,23 @@ export default async function PlantDashboardPage({
   // Plant existence is already confirmed above, so these can run in
   // parallel — none of them has its own not-found path to race against.
   const now = new Date();
+  const start24h = new Date(now.getTime() - MS_PER_DAY);
+  const start7d = new Date(now.getTime() - 7 * MS_PER_DAY);
+
   const [latestReading, readings24h, readings7d, careEvents] = await Promise.all([
     getLatestReading(plantId),
-    getReadingHistory(plantId, { start: new Date(now.getTime() - MS_PER_DAY), end: now }),
-    getReadingHistory(plantId, { start: new Date(now.getTime() - 7 * MS_PER_DAY), end: now }),
+    getReadingHistory(plantId, { start: start24h, end: now }),
+    getReadingHistory(plantId, { start: start7d, end: now }),
     getCareEvents(plantId),
   ]);
+
+  // The chart's x-axis domain, not just the reading fetch — see
+  // MoistureHistoryChart's comment on why "the selected range" is this
+  // fixed window, not wherever the actual readings happen to start/end.
+  const rangeBounds = {
+    "24h": { start: start24h.toISOString(), end: now.toISOString() },
+    "7d": { start: start7d.toISOString(), end: now.toISOString() },
+  };
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-16">
@@ -60,6 +71,8 @@ export default async function PlantDashboardPage({
 
       <MoistureHistoryChart
         readingsByRange={{ "24h": readings24h, "7d": readings7d }}
+        rangeBounds={rangeBounds}
+        careEvents={careEvents}
         reportingIntervalSeconds={reportingIntervalSeconds}
       />
 
