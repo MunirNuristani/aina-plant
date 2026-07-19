@@ -10,27 +10,50 @@ export type CreateCareEventInput = {
   notes?: string;
 };
 
-export type CreateCareEventResult =
+// occurredAt/notes always sent (notes is the only field the backend lets
+// you clear via PATCH — an explicit "" — so it's never omitted). amount and
+// unit are omit-to-leave-unchanged: the backend's update service only
+// touches a field when the key is present at all, and its validation
+// schema has no null/empty escape hatch for either (amount must be a
+// non-negative number, unit must be a non-empty string, if provided) — so
+// there is currently no way to CLEAR an already-set amount or unit through
+// this API, only to change it to a different value. See the edit form's
+// helper text, which says this rather than pretending otherwise.
+export type UpdateCareEventInput = {
+  occurredAt: string;
+  amount?: number;
+  unit?: string;
+  notes: string;
+};
+
+export type CareEventActionResult =
   | { ok: true; careEvent: CareEvent }
   | { ok: false; fieldErrors: Record<string, string>; formError?: string };
 
-// Runs server-side deliberately: the backend has no CORS configuration
-// (server-to-server calls are never subject to CORS — only browser-issued
-// cross-origin requests are), so a direct client-side fetch from
-// LogWateringForm fails outright with a CORS error. Routing through this
-// Server Action keeps the actual backend request server-to-server, which
-// sidesteps that with no backend change.
-//
-// Returns a result object rather than throwing — per Next's own guidance
-// for expected/validation errors, model them as return values. A thrown
-// error crossing the Server Action boundary isn't guaranteed to preserve a
-// custom error subclass or its extra fields (React/Next may collapse it to
-// a generic message in production), so field-level validation detail has
-// to travel back as plain data, not as a thrown error.
+async function parseErrorResult(res: Response, fallbackVerb: string): Promise<CareEventActionResult> {
+  const body: { error?: ApiError } = await res.json().catch(() => ({}));
+  const error = body.error;
+
+  if (res.status === 400 && error?.code === "VALIDATION_ERROR" && Array.isArray(error.details)) {
+    const fieldErrors: Record<string, string> = {};
+    for (const detail of error.details as ApiErrorDetail[]) {
+      fieldErrors[detail.field] = detail.message;
+    }
+    return { ok: false, fieldErrors, formError: fieldErrors["(root)"] };
+  }
+
+  return { ok: false, fieldErrors: {}, formError: error?.message ?? `Failed to ${fallbackVerb} (${res.status})` };
+}
+
+// Runs server-side deliberately: the backend has no CORS configuration, so
+// a direct client-side fetch from a Client Component fails outright (see
+// LogWateringForm / createCareEventAction, which hit this first). Returns
+// a result object rather than throwing, per Next's guidance for expected
+// errors — see createCareEventAction's comment for the full reasoning.
 export async function createCareEventAction(
   plantId: string,
   input: CreateCareEventInput,
-): Promise<CreateCareEventResult> {
+): Promise<CareEventActionResult> {
   const res = await apiFetch(`/plants/${plantId}/care-events`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -38,20 +61,41 @@ export async function createCareEventAction(
   });
 
   if (!res.ok) {
-    const body: { error?: ApiError } = await res.json().catch(() => ({}));
-    const error = body.error;
-
-    if (res.status === 400 && error?.code === "VALIDATION_ERROR" && Array.isArray(error.details)) {
-      const fieldErrors: Record<string, string> = {};
-      for (const detail of error.details as ApiErrorDetail[]) {
-        fieldErrors[detail.field] = detail.message;
-      }
-      return { ok: false, fieldErrors, formError: fieldErrors["(root)"] };
-    }
-
-    return { ok: false, fieldErrors: {}, formError: error?.message ?? `Failed to log watering (${res.status})` };
+    return parseErrorResult(res, "log watering");
   }
 
   const data: { careEvent: CareEvent } = await res.json();
   return { ok: true, careEvent: data.careEvent };
+}
+
+export async function updateCareEventAction(
+  plantId: string,
+  careEventId: string,
+  input: UpdateCareEventInput,
+): Promise<CareEventActionResult> {
+  const res = await apiFetch(`/plants/${plantId}/care-events/${careEventId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+  if (!res.ok) {
+    return parseErrorResult(res, "update watering");
+  }
+
+  const data: { careEvent: CareEvent } = await res.json();
+  return { ok: true, careEvent: data.careEvent };
+}
+
+export type DeleteCareEventResult = { ok: true } | { ok: false; error: string };
+
+export async function deleteCareEventAction(plantId: string, careEventId: string): Promise<DeleteCareEventResult> {
+  const res = await apiFetch(`/plants/${plantId}/care-events/${careEventId}`, { method: "DELETE" });
+
+  if (!res.ok) {
+    const body: { error?: ApiError } = await res.json().catch(() => ({}));
+    return { ok: false, error: body.error?.message ?? `Failed to delete watering (${res.status})` };
+  }
+
+  return { ok: true };
 }
