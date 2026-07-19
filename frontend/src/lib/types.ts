@@ -46,6 +46,42 @@ export type CareEvent = {
   deletedAt: string | null;
 };
 
+export type MoistureTrendDirection = "INCREASING" | "DECREASING" | "STABLE" | "INSUFFICIENT_DATA";
+
+export type MoistureReadingPoint = {
+  recordedAt: string;
+  moisturePercent: number;
+};
+
+export type MoistureTrendResult = {
+  direction: MoistureTrendDirection;
+  readingCount: number;
+  // Omitted by the API when direction is INSUFFICIENT_DATA — there is no
+  // fabricated change to report without enough evidence for one.
+  earliest?: MoistureReadingPoint;
+  latest?: MoistureReadingPoint;
+  changePercent?: number;
+};
+
+export type DryingRateState = "VALID" | "LOW_CONFIDENCE" | "INSUFFICIENT_DATA" | "NOT_DRYING";
+
+export type DryingPeriodResult = {
+  state: DryingRateState;
+  periodStart: string;
+  periodEnd: string;
+  readingCount: number;
+  // Omitted unless state is VALID or LOW_CONFIDENCE.
+  ratePercentPerHour?: number;
+  hasGap: boolean;
+};
+
+export type DryingRateAnalysis = {
+  analysisPeriodStart: string;
+  analysisPeriodEnd: string;
+  unit: "percent_per_hour";
+  periods: DryingPeriodResult[];
+};
+
 export type ApiErrorDetail = { field: string; message: string };
 
 export type ApiError = {

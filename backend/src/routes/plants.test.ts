@@ -870,6 +870,72 @@ describe('GET /api/v1/plants/:plantId/readings/latest', () => {
   });
 });
 
+describe('GET /api/v1/plants/:plantId/moisture-trend', () => {
+  it('returns 404 for a nonexistent plant', async () => {
+    const res = await request(app).get(`/api/v1/plants/${randomUUID()}/moisture-trend`);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns INSUFFICIENT_DATA for a plant with no readings', async () => {
+    const res = await request(app).get(`/api/v1/plants/${plantId}/moisture-trend`);
+    expect(res.status).toBe(200);
+    expect(res.body.trend).toMatchObject({ direction: 'INSUFFICIENT_DATA', readingCount: 0 });
+  });
+
+  it('computes a real trend from the plant\'s readings', async () => {
+    await createReading({ recordedAt: new Date(Date.now() - 2 * 60 * 60 * 1000), moisturePercent: 30 });
+    await createReading({ recordedAt: new Date(Date.now() - 1 * 60 * 60 * 1000), moisturePercent: 45 });
+    await createReading({ recordedAt: new Date(), moisturePercent: 60 });
+
+    const res = await request(app).get(`/api/v1/plants/${plantId}/moisture-trend`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.trend.direction).toBe('INCREASING');
+    expect(res.body.trend.readingCount).toBe(3);
+    expect(res.body.trend.changePercent).toBe(30);
+  });
+
+  it('rejects a non-positive windowHours', async () => {
+    const res = await request(app).get(`/api/v1/plants/${plantId}/moisture-trend?windowHours=-1`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
+describe('GET /api/v1/plants/:plantId/drying-rate', () => {
+  it('returns 404 for a nonexistent plant', async () => {
+    const res = await request(app).get(`/api/v1/plants/${randomUUID()}/drying-rate`);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns a single INSUFFICIENT_DATA period for a plant with no readings', async () => {
+    const res = await request(app).get(`/api/v1/plants/${plantId}/drying-rate`);
+    expect(res.status).toBe(200);
+    expect(res.body.dryingRate.periods).toHaveLength(1);
+    expect(res.body.dryingRate.periods[0].state).toBe('INSUFFICIENT_DATA');
+    expect(res.body.dryingRate.unit).toBe('percent_per_hour');
+  });
+
+  it('computes a real drying rate from the plant\'s readings', async () => {
+    await createReading({ recordedAt: new Date(Date.now() - 4 * 60 * 60 * 1000), moisturePercent: 60 });
+    await createReading({ recordedAt: new Date(Date.now() - 2 * 60 * 60 * 1000), moisturePercent: 50 });
+    await createReading({ recordedAt: new Date(), moisturePercent: 40 });
+
+    const res = await request(app).get(`/api/v1/plants/${plantId}/drying-rate`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.dryingRate.periods).toHaveLength(1);
+    expect(res.body.dryingRate.periods[0].state).toBe('VALID');
+    expect(res.body.dryingRate.periods[0].ratePercentPerHour).toBeCloseTo(5, 5);
+  });
+
+  it('rejects a non-positive periodDays', async () => {
+    const res = await request(app).get(`/api/v1/plants/${plantId}/drying-rate?periodDays=0`);
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
 describe('GET /api/v1/plants/:plantId/readings', () => {
   it('returns 404 for a nonexistent plant', async () => {
     const res = await request(app).get(`/api/v1/plants/${randomUUID()}/readings`);

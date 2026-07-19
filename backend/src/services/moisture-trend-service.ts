@@ -1,4 +1,5 @@
 import { prisma } from '../db';
+import { NotFoundError } from '../http/errors';
 
 // Percentage-point change within which two readings are considered "the
 // same" rather than a real increase/decrease -- moisture sensors are
@@ -116,6 +117,11 @@ export async function getMoistureTrendForPlant(
   windowHours: number = DEFAULT_ANALYSIS_WINDOW_HOURS,
   stableTolerancePercent: number = DEFAULT_STABLE_TOLERANCE_PERCENT,
 ): Promise<MoistureTrendResult> {
+  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  if (!plant) {
+    throw new NotFoundError('Plant not found');
+  }
+
   const windowStart = new Date(Date.now() - windowHours * 60 * 60 * 1000);
 
   const readings = await prisma.sensorReading.findMany({
