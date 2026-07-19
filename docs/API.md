@@ -771,3 +771,123 @@ Empty body.
 | Status | Condition                                                                                |
 | ------ | ---------------------------------------------------------------------------------------- |
 | `404`  | No matching, not-already-deleted care event for that plant (same rule as `PATCH` above). |
+
+---
+
+## Analytics
+
+Derived, computed views over a plant's readings and care events — never
+raw data, and never fabricated where the underlying data doesn't support
+a verdict. Both endpoints below explicitly report when there isn't
+enough evidence rather than guessing. `FR-ANALYTICS-003`.
+
+### `GET /api/v1/plants/:plantId/moisture-trend`
+
+Compares the plant's earliest and latest valid reading within a recent
+window to say whether moisture is rising, falling, or holding steady —
+"soil moisture went from 42% to 61% over the last day." Deliberately an
+earliest-to-latest comparison, not a regression line or moving average:
+simple and easy to explain plainly to a user.
+
+#### Query parameters
+
+| Param         | Type   | Default | Notes                              |
+| ------------- | ------ | :-----: | ----------------------------------- |
+| `windowHours` | number |  `24`   | How far back to look. Must be > 0. |
+
+```bash
+curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/moisture-trend?windowHours=24"
+```
+
+#### `200` response
+
+`direction` is one of `INCREASING`, `DECREASING`, `STABLE`, or
+`INSUFFICIENT_DATA` — a change within ±3 percentage points (not
+configurable via this endpoint) counts as `STABLE`, since sensor noise
+alone can produce a 1–2 point wobble between readings. Fewer than 3 valid
+readings in the window is `INSUFFICIENT_DATA`; `earliest`/`latest`/
+`changePercent` are omitted entirely in that case — there is deliberately
+no fabricated change reported when there isn't enough evidence for one.
+
+```json
+{
+  "trend": {
+    "direction": "INCREASING",
+    "readingCount": 3,
+    "earliest": { "recordedAt": "2026-01-01T00:00:00.000Z", "moisturePercent": 30 },
+    "latest": { "recordedAt": "2026-01-02T00:00:00.000Z", "moisturePercent": 60 },
+    "changePercent": 30
+  }
+}
+```
+
+#### Errors
+
+| Status | Condition                                   |
+| ------ | -------------------------------------------- |
+| `400`  | `windowHours` present but not a number > 0.   |
+| `404`  | No plant with that `id`.                      |
+
+### `GET /api/v1/plants/:plantId/drying-rate`
+
+Estimates how fast soil moisture is declining, in percent per hour, over
+an analysis window split into watering-bounded periods — a watering
+event always starts a new period (it physically resets the moisture
+level, breaking the "continuous decline" assumption), regardless of how
+large or small the time gap around it is. Zero watering events in the
+window means exactly one period spanning the whole thing.
+
+#### Query parameters
+
+| Param        | Type   | Default | Notes                              |
+| ------------ | ------ | :-----: | ----------------------------------- |
+| `periodDays` | number |   `7`   | How far back to look. Must be > 0. |
+
+```bash
+curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/drying-rate?periodDays=7"
+```
+
+#### `200` response
+
+`periods` is one entry per watering-bounded period, oldest first. Each
+period's `state` is one of:
+
+- `VALID` — a usable rate, no unusually large gap between readings.
+- `LOW_CONFIDENCE` — a usable rate, but a gap larger than 6 hours between
+  two consecutive readings means the true moisture path between them is
+  unknown, not a straight line.
+- `NOT_DRYING` — moisture rose or held steady in this period; there is no
+  meaningful "drying rate" to report, so `ratePercentPerHour` is omitted.
+- `INSUFFICIENT_DATA` — fewer than 3 readings fell in this period;
+  `ratePercentPerHour` is omitted.
+
+`ratePercentPerHour` (present only for `VALID`/`LOW_CONFIDENCE`) is
+always a non-negative magnitude ("declining at 2.3%/hour"), never a
+signed delta.
+
+```json
+{
+  "dryingRate": {
+    "analysisPeriodStart": "2026-01-01T00:00:00.000Z",
+    "analysisPeriodEnd": "2026-01-08T00:00:00.000Z",
+    "unit": "percent_per_hour",
+    "periods": [
+      {
+        "state": "VALID",
+        "periodStart": "2026-01-01T00:00:00.000Z",
+        "periodEnd": "2026-01-08T00:00:00.000Z",
+        "readingCount": 3,
+        "ratePercentPerHour": 5,
+        "hasGap": false
+      }
+    ]
+  }
+}
+```
+
+#### Errors
+
+| Status | Condition                                    |
+| ------ | --------------------------------------------- |
+| `400`  | `periodDays` present but not a number > 0.     |
+| `404`  | No plant with that `id`.                       |

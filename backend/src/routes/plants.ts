@@ -8,9 +8,12 @@ import {
   listCareEventsForPlant,
   updateCareEvent,
 } from '../services/care-event-service';
+import { getMoistureTrendForPlant } from '../services/moisture-trend-service';
+import { getDryingRateForPlant } from '../services/drying-rate-service';
 import { listReadingsQuerySchema } from '../validation/reading-query';
 import { createPlantSchema, assignPlantDeviceSchema } from '../validation/plant';
 import { createCareEventSchema, updateCareEventSchema } from '../validation/care-event';
+import { moistureTrendQuerySchema, dryingRateQuerySchema } from '../validation/analytics-query';
 import { toFieldErrors, ValidationError } from '../http/errors';
 
 export const plantsRouter = Router();
@@ -76,6 +79,26 @@ plantsRouter.get('/:plantId/readings', async (req, res) => {
   });
 
   res.status(200).json({ readings });
+});
+
+plantsRouter.get('/:plantId/moisture-trend', async (req, res) => {
+  const parsed = moistureTrendQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw new ValidationError('Invalid query parameters', toFieldErrors(parsed.error.issues));
+  }
+
+  const trend = await getMoistureTrendForPlant(req.params.plantId, parsed.data.windowHours);
+  res.status(200).json({ trend });
+});
+
+plantsRouter.get('/:plantId/drying-rate', async (req, res) => {
+  const parsed = dryingRateQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    throw new ValidationError('Invalid query parameters', toFieldErrors(parsed.error.issues));
+  }
+
+  const dryingRate = await getDryingRateForPlant(req.params.plantId, parsed.data.periodDays);
+  res.status(200).json({ dryingRate });
 });
 
 plantsRouter.post('/:plantId/care-events', async (req, res) => {

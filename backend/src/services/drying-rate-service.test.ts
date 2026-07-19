@@ -9,6 +9,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
+import { NotFoundError } from '../http/errors';
 import {
   analyzeDryingRate,
   getDryingRateForPlant,
@@ -447,5 +448,9 @@ describe('getDryingRateForPlant', () => {
     const { plant } = await createPlantWithDevice();
     const result = await getDryingRateForPlant(plant.id);
     expect(result.periods[0].state).toBe('INSUFFICIENT_DATA');
+  });
+
+  it('throws NotFoundError for a nonexistent plant', async () => {
+    await expect(getDryingRateForPlant(randomUUID())).rejects.toThrow(NotFoundError);
   });
 });

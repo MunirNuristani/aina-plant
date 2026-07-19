@@ -1,4 +1,5 @@
 import { prisma } from '../db';
+import { NotFoundError } from '../http/errors';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -237,6 +238,11 @@ export async function getDryingRateForPlant(
   maxGapHours?: number,
   minReadingsPerPeriod?: number,
 ): Promise<DryingRateAnalysis> {
+  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  if (!plant) {
+    throw new NotFoundError('Plant not found');
+  }
+
   const periodEnd = new Date();
   const periodStart = new Date(periodEnd.getTime() - periodDays * DAY_MS);
 

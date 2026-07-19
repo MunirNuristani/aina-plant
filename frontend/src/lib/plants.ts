@@ -1,5 +1,5 @@
 import { apiFetch } from "./api";
-import type { CareEvent, Plant, SensorReading } from "./types";
+import type { CareEvent, DryingRateAnalysis, MoistureTrendResult, Plant, SensorReading } from "./types";
 
 export async function getPlants(): Promise<Plant[]> {
   const res = await apiFetch("/plants", { cache: "no-store" });
@@ -74,4 +74,32 @@ export async function getCareEvents(plantId: string): Promise<CareEvent[]> {
 
   const data: { careEvents: CareEvent[] } = await res.json();
   return data.careEvents;
+}
+
+// Uses the API's own default window (24h) — see TrendSummary's
+// TREND_WINDOW_HOURS constant, which must stay in sync with this if a
+// custom windowHours is ever passed here.
+export async function getMoistureTrend(plantId: string): Promise<MoistureTrendResult> {
+  const res = await apiFetch(`/plants/${plantId}/moisture-trend`, { cache: "no-store" });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load moisture trend for plant ${plantId} (${res.status})`);
+  }
+
+  const data: { trend: MoistureTrendResult } = await res.json();
+  return data.trend;
+}
+
+// Uses the API's own default period (7 days). Unlike the trend window
+// above, the actual analyzed period is echoed back in the response
+// (analysisPeriodStart/End), so the frontend never needs to assume it.
+export async function getDryingRate(plantId: string): Promise<DryingRateAnalysis> {
+  const res = await apiFetch(`/plants/${plantId}/drying-rate`, { cache: "no-store" });
+
+  if (!res.ok) {
+    throw new Error(`Failed to load drying rate for plant ${plantId} (${res.status})`);
+  }
+
+  const data: { dryingRate: DryingRateAnalysis } = await res.json();
+  return data.dryingRate;
 }

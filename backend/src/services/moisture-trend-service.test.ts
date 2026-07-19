@@ -8,6 +8,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
+import { NotFoundError } from '../http/errors';
 import {
   analyzeMoistureTrend,
   getMoistureTrendForPlant,
@@ -286,5 +287,9 @@ describe('getMoistureTrendForPlant', () => {
 
     const narrowTolerance = await getMoistureTrendForPlant(plant.id, 24, 1);
     expect(narrowTolerance.direction).toBe('INCREASING');
+  });
+
+  it('throws NotFoundError for a nonexistent plant', async () => {
+    await expect(getMoistureTrendForPlant(randomUUID())).rejects.toThrow(NotFoundError);
   });
 });

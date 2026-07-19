@@ -6,8 +6,16 @@ import { LogWateringForm } from "@/components/log-watering-form";
 import { MoistureHistoryChart } from "@/components/moisture-history-chart";
 import { MoistureStatusCard } from "@/components/moisture-status-card";
 import { TechnicalDetails } from "@/components/technical-details";
+import { TrendSummary } from "@/components/trend-summary";
 import { DEFAULT_REPORTING_INTERVAL_SECONDS } from "@/lib/moisture";
-import { getCareEvents, getLatestReading, getPlant, getReadingHistory } from "@/lib/plants";
+import {
+  getCareEvents,
+  getDryingRate,
+  getLatestReading,
+  getMoistureTrend,
+  getPlant,
+  getReadingHistory,
+} from "@/lib/plants";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -32,11 +40,13 @@ export default async function PlantDashboardPage({
   const start24h = new Date(now.getTime() - MS_PER_DAY);
   const start7d = new Date(now.getTime() - 7 * MS_PER_DAY);
 
-  const [latestReading, readings24h, readings7d, careEvents] = await Promise.all([
+  const [latestReading, readings24h, readings7d, careEvents, trend, dryingRate] = await Promise.all([
     getLatestReading(plantId),
     getReadingHistory(plantId, { start: start24h, end: now }),
     getReadingHistory(plantId, { start: start7d, end: now }),
     getCareEvents(plantId),
+    getMoistureTrend(plantId),
+    getDryingRate(plantId),
   ]);
 
   // The chart's x-axis domain, not just the reading fetch — see
@@ -64,6 +74,8 @@ export default async function PlantDashboardPage({
       </div>
 
       <MoistureStatusCard reading={latestReading} reportingIntervalSeconds={reportingIntervalSeconds} />
+
+      <TrendSummary trend={trend} dryingRate={dryingRate} />
 
       <LogWateringForm plantId={plantId} />
 
