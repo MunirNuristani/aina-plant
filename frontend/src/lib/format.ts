@@ -38,3 +38,12 @@ export function formatAxisTime(timestampMs: number, range: "24h" | "7d"): string
     ? date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
+
+// Value for an <input type="datetime-local">, in LOCAL time (not UTC) —
+// the format it requires: "YYYY-MM-DDTHH:mm", no timezone. Round-trips
+// correctly with `new Date(value)`, which the spec treats as local time
+// for a date-time string with no offset.
+export function toLocalDateTimeInputValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}

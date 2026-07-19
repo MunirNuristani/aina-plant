@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeviceStatusBadge } from "@/components/device-status-badge";
+import { LogWateringForm } from "@/components/log-watering-form";
 import { MoistureHistoryChart } from "@/components/moisture-history-chart";
 import { MoistureStatusCard } from "@/components/moisture-status-card";
 import { TechnicalDetails } from "@/components/technical-details";
@@ -50,6 +51,8 @@ export default async function PlantDashboardPage({
       </div>
 
       <MoistureStatusCard reading={latestReading} reportingIntervalSeconds={reportingIntervalSeconds} />
+
+      <LogWateringForm plantId={plantId} />
 
       <MoistureHistoryChart
         readingsByRange={{ "24h": readings24h, "7d": readings7d }}
