@@ -6,6 +6,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -13,9 +14,10 @@ import {
 } from "recharts";
 import { formatAxisTime, formatDateTime } from "@/lib/format";
 import { buildChartSeries, type ChartPoint } from "@/lib/moisture";
-import type { SensorReading } from "@/lib/types";
+import type { CareEvent, SensorReading } from "@/lib/types";
 
 type Range = "24h" | "7d";
+type RangeBounds = Record<Range, { start: string; end: string }>;
 
 const RANGES: Range[] = ["24h", "7d"];
 const RANGE_LABEL: Record<Range, string> = { "24h": "24 hours", "7d": "7 days" };
@@ -24,31 +26,51 @@ const AXIS_TICK = { fill: "var(--color-ink-muted)", fontSize: 11, fontFamily: "v
 
 export function MoistureHistoryChart({
   readingsByRange,
+  rangeBounds,
+  careEvents,
   reportingIntervalSeconds,
 }: {
   readingsByRange: Record<Range, SensorReading[]>;
+  rangeBounds: RangeBounds;
+  careEvents: CareEvent[];
   reportingIntervalSeconds: number;
 }) {
   const [range, setRange] = useState<Range>("7d");
   const readings = readingsByRange[range];
+  // buildChartSeries and its data (gaps, values) are untouched by anything
+  // in this component — event markers are a purely additive overlay, never
+  // folded into the sensor series itself.
   const series = useMemo(
     () => buildChartSeries(readings, reportingIntervalSeconds),
     [readings, reportingIntervalSeconds],
   );
-  // Recharts' auto tick generation on a numeric time domain doesn't respect
-  // tickCount the way it does on a real d3 time scale — it was rendering 13+
-  // overlapping same-day labels. Computing exact, evenly-spaced tick values
-  // ourselves and handing them to XAxis via `ticks` sidesteps that entirely.
+
+  const bounds = rangeBounds[range];
+  const boundsStart = new Date(bounds.start).getTime();
+  const boundsEnd = new Date(bounds.end).getTime();
+
+  // "The selected range" is this fixed 24h/7d window, not wherever actual
+  // readings happen to start/end — a sparse or newly-registered device
+  // shouldn't shrink the axis, and a watering event needs a valid x
+  // position on the chart even if it falls outside the real reading data
+  // (before the first reading, inside a gap, etc.).
   const ticks = useMemo(() => {
-    if (series.length === 0) return [];
-    const first = series[0].time;
-    const last = series[series.length - 1].time;
-    // Mobile-first: chosen so labels stay non-overlapping down to a ~340px
-    // plot width (a card on a 390px phone), not just on a full desktop chart.
     const count = range === "24h" ? 4 : 5;
-    if (first === last) return [first];
-    return Array.from({ length: count }, (_, i) => first + ((last - first) * i) / (count - 1));
-  }, [series, range]);
+    return Array.from({ length: count }, (_, i) => boundsStart + ((boundsEnd - boundsStart) * i) / (count - 1));
+  }, [boundsStart, boundsEnd, range]);
+
+  // Events inside the selected range, oldest first to match the chart's
+  // left-to-right reading direction (careEvents itself is newest-first).
+  const visibleEvents = useMemo(
+    () =>
+      careEvents
+        .filter((event) => {
+          const t = new Date(event.occurredAt).getTime();
+          return t >= boundsStart && t <= boundsEnd;
+        })
+        .sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime()),
+    [careEvents, boundsStart, boundsEnd],
+  );
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6">
@@ -80,14 +102,20 @@ export function MoistureHistoryChart({
         </div>
       ) : (
         <>
-          <div className="h-64 w-full" role="img" aria-label={`Moisture percentage over the last ${RANGE_LABEL[range]}`}>
+          <div
+            className="h-64 w-full"
+            role="img"
+            aria-label={`Moisture percentage over the last ${RANGE_LABEL[range]}${
+              visibleEvents.length > 0 ? `, with ${visibleEvents.length} watering event(s) marked` : ""
+            }`}
+          >
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={series} margin={{ top: 8, right: 28, left: 0, bottom: 0 }}>
                 <CartesianGrid vertical={false} stroke="var(--color-line)" />
                 <XAxis
                   dataKey="time"
                   type="number"
-                  domain={["dataMin", "dataMax"]}
+                  domain={[boundsStart, boundsEnd]}
                   scale="time"
                   padding={{ left: 12, right: 12 }}
                   tickFormatter={(t: number) => formatAxisTime(t, range)}
@@ -134,9 +162,57 @@ export function MoistureHistoryChart({
                   connectNulls={false}
                   isAnimationActive={false}
                 />
+                {/* Watering events — a dashed terracotta line per the AINA
+                    usage guide ("works well for watering events, alerts,
+                    and timeline markers"), independent of the sensor series:
+                    it renders at the event's real timestamp regardless of
+                    whether a reading exists there, so it still shows up
+                    inside a gap or outside the actual reading data. Dashed
+                    (not the gridlines' solid hairline) deliberately reads as
+                    a different layer — an annotation, not a grid. */}
+                {visibleEvents.map((event) => (
+                  <ReferenceLine
+                    key={event.id}
+                    x={new Date(event.occurredAt).getTime()}
+                    stroke="var(--color-accent-warm)"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 3"
+                    label={{ value: "\u{1F4A7}", position: "top", fontSize: 12 }}
+                  />
+                ))}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
+
+          {/* The real accessible channel for event details — reachable by
+              reading the page normally, no hover/focus/pointer needed. The
+              chart's ReferenceLines are a visual-only enhancement; SVG
+              elements like these aren't keyboard-focusable in any
+              lightweight way, so "keyboard accessible where practical"
+              means here, not inside the chart canvas. */}
+          {visibleEvents.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="font-mono text-xs uppercase tracking-widest text-ink-muted">
+                Watering events in this range
+              </p>
+              <ul className="flex flex-col gap-1.5">
+                {visibleEvents.map((event) => (
+                  <li key={event.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                    <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-accent-warm" aria-hidden="true" />
+                    <span className="text-ink">{formatDateTime(event.occurredAt)}</span>
+                    {event.amount !== null ? (
+                      <span className="font-mono text-ink-muted">
+                        {event.amount}
+                        {event.unit ? ` ${event.unit}` : ""}
+                      </span>
+                    ) : null}
+                    {event.notes ? <span className="text-ink-muted">&mdash; {event.notes}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <MoistureHistoryTable readings={readings} />
         </>
       )}
