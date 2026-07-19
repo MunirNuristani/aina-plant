@@ -4,11 +4,27 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
+import { createTestUserAndToken } from '../test-helpers/auth';
 
 const app = createApp();
 
 let plantId: string;
 let deviceId: string;
+let userId: string;
+let token: string;
+
+// Every route on plantsRouter requires an authenticated user (applied
+// router-level in app.ts) -- this wraps request(app) so every call site
+// in this file gets the header without repeating it. All fixtures created
+// directly via Prisma below use the same `userId` so ownership lines up.
+function req() {
+  return {
+    get: (url: string) => request(app).get(url).set('Authorization', `Bearer ${token}`),
+    post: (url: string) => request(app).post(url).set('Authorization', `Bearer ${token}`),
+    patch: (url: string) => request(app).patch(url).set('Authorization', `Bearer ${token}`),
+    delete: (url: string) => request(app).delete(url).set('Authorization', `Bearer ${token}`),
+  };
+}
 
 function createReading(overrides: Partial<Record<string, unknown>> = {}) {
   return prisma.sensorReading.create({
@@ -25,7 +41,11 @@ function createReading(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 beforeEach(async () => {
-  const plant = await prisma.plant.create({ data: { name: 'Latest Reading Test Plant' } });
+  ({ userId, token } = await createTestUserAndToken());
+
+  const plant = await prisma.plant.create({
+    data: { name: 'Latest Reading Test Plant', userId },
+  });
   plantId = plant.id;
 
   const device = await prisma.device.create({
@@ -35,6 +55,7 @@ beforeEach(async () => {
       credentialHash: hashDeviceCredential('unused'),
       enabled: true,
       plantId,
+      userId,
     },
   });
   deviceId = device.id;
@@ -61,7 +82,7 @@ describe('POST /api/v1/plants', () => {
   });
 
   function post(body: unknown) {
-    return request(app).post('/api/v1/plants').send(body);
+    return req().post('/api/v1/plants').send(body);
   }
 
   it('creates a valid plant and returns 201 with the full created record', async () => {
@@ -173,7 +194,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
 
   async function createTestPlant(overrides: Partial<Record<string, unknown>> = {}) {
     const plant = await prisma.plant.create({
-      data: { name: 'List/Detail Test Plant', ...overrides },
+      data: { name: 'List/Detail Test Plant', userId, ...overrides },
     });
     createdPlantIds.push(plant.id);
     return plant;
@@ -190,6 +211,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
         credentialHash: hashDeviceCredential('unused'),
         enabled: true,
         plantId: plantIdForDevice,
+        userId,
         ...overrides,
       },
     });
@@ -199,7 +221,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
 
   describe('GET /api/v1/plants', () => {
     it('returns a well-formed array response', async () => {
-      const res = await request(app).get('/api/v1/plants');
+      const res = await req().get('/api/v1/plants');
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body.plants)).toBe(true);
     });
@@ -207,7 +229,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
     it('lists a plant just created', async () => {
       const plant = await createTestPlant({ name: 'Listed Plant' });
 
-      const res = await request(app).get('/api/v1/plants');
+      const res = await req().get('/api/v1/plants');
 
       expect(res.status).toBe(200);
       const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
@@ -218,7 +240,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
     it('includes an empty devices array for a plant with no device assigned', async () => {
       const plant = await createTestPlant();
 
-      const res = await request(app).get('/api/v1/plants');
+      const res = await req().get('/api/v1/plants');
 
       const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
       expect(found.devices).toEqual([]);
@@ -228,7 +250,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
       const plant = await createTestPlant();
       const device = await createTestDevice(plant.id);
 
-      const res = await request(app).get('/api/v1/plants');
+      const res = await req().get('/api/v1/plants');
 
       const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
       expect(found.devices).toHaveLength(1);
@@ -244,7 +266,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
       const plant = await createTestPlant();
       await createTestDevice(plant.id, { enabled: false });
 
-      const res = await request(app).get('/api/v1/plants');
+      const res = await req().get('/api/v1/plants');
 
       const found = res.body.plants.find((p: { id: string }) => p.id === plant.id);
       expect(found.devices).toEqual([]);
@@ -255,7 +277,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
     it('returns a single plant by id', async () => {
       const plant = await createTestPlant({ name: 'Detail Plant', location: 'Balcony' });
 
-      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+      const res = await req().get(`/api/v1/plants/${plant.id}`);
 
       expect(res.status).toBe(200);
       expect(res.body.plant).toMatchObject({
@@ -266,19 +288,19 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
     });
 
     it('returns 404 for a nonexistent plant', async () => {
-      const res = await request(app).get(`/api/v1/plants/${randomUUID()}`);
+      const res = await req().get(`/api/v1/plants/${randomUUID()}`);
       expect(res.status).toBe(404);
     });
 
     it('returns 404 for a malformed plant id', async () => {
-      const res = await request(app).get('/api/v1/plants/not-a-real-id');
+      const res = await req().get('/api/v1/plants/not-a-real-id');
       expect(res.status).toBe(404);
     });
 
     it('includes an empty devices array when no device is assigned', async () => {
       const plant = await createTestPlant();
 
-      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+      const res = await req().get(`/api/v1/plants/${plant.id}`);
 
       expect(res.status).toBe(200);
       expect(res.body.plant.devices).toEqual([]);
@@ -288,7 +310,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
       const plant = await createTestPlant();
       const device = await createTestDevice(plant.id);
 
-      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+      const res = await req().get(`/api/v1/plants/${plant.id}`);
 
       expect(res.status).toBe(200);
       expect(res.body.plant.devices).toHaveLength(1);
@@ -304,7 +326,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
       const plant = await createTestPlant();
       await createTestDevice(plant.id, { enabled: false });
 
-      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+      const res = await req().get(`/api/v1/plants/${plant.id}`);
 
       expect(res.status).toBe(200);
       expect(res.body.plant.devices).toEqual([]);
@@ -315,7 +337,7 @@ describe('GET /api/v1/plants and GET /api/v1/plants/:plantId', () => {
       const enabledDevice = await createTestDevice(plant.id, { enabled: true });
       await createTestDevice(plant.id, { enabled: false });
 
-      const res = await request(app).get(`/api/v1/plants/${plant.id}`);
+      const res = await req().get(`/api/v1/plants/${plant.id}`);
 
       expect(res.body.plant.devices).toHaveLength(1);
       expect(res.body.plant.devices[0].id).toBe(enabledDevice.id);
@@ -345,7 +367,7 @@ describe('POST /api/v1/plants/:plantId/device', () => {
 
   async function createTestPlant(overrides: Partial<Record<string, unknown>> = {}) {
     const plant = await prisma.plant.create({
-      data: { name: 'Assignment Test Plant', ...overrides },
+      data: { name: 'Assignment Test Plant', userId, ...overrides },
     });
     createdPlantIds.push(plant.id);
     return plant;
@@ -358,6 +380,7 @@ describe('POST /api/v1/plants/:plantId/device', () => {
         identifier: `assignment-test-device-${randomUUID()}`,
         credentialHash: hashDeviceCredential('unused'),
         enabled: true,
+        userId,
         ...overrides,
       },
     });
@@ -366,7 +389,7 @@ describe('POST /api/v1/plants/:plantId/device', () => {
   }
 
   function assign(targetPlantId: string, body: unknown) {
-    return request(app).post(`/api/v1/plants/${targetPlantId}/device`).send(body);
+    return req().post(`/api/v1/plants/${targetPlantId}/device`).send(body);
   }
 
   it('assigns an enabled, unassigned device to a plant', async () => {
@@ -514,23 +537,23 @@ describe('care events (POST/GET/PATCH/DELETE /api/v1/plants/:plantId/care-events
 
   async function createTestPlant(overrides: Partial<Record<string, unknown>> = {}) {
     const plant = await prisma.plant.create({
-      data: { name: 'Care Event Test Plant', ...overrides },
+      data: { name: 'Care Event Test Plant', userId, ...overrides },
     });
     createdPlantIds.push(plant.id);
     return plant;
   }
 
   function createEvent(plantId: string, body: unknown) {
-    return request(app).post(`/api/v1/plants/${plantId}/care-events`).send(body);
+    return req().post(`/api/v1/plants/${plantId}/care-events`).send(body);
   }
   function listEvents(plantId: string) {
-    return request(app).get(`/api/v1/plants/${plantId}/care-events`);
+    return req().get(`/api/v1/plants/${plantId}/care-events`);
   }
   function updateEvent(plantId: string, careEventId: string, body: unknown) {
-    return request(app).patch(`/api/v1/plants/${plantId}/care-events/${careEventId}`).send(body);
+    return req().patch(`/api/v1/plants/${plantId}/care-events/${careEventId}`).send(body);
   }
   function deleteEvent(plantId: string, careEventId: string) {
-    return request(app).delete(`/api/v1/plants/${plantId}/care-events/${careEventId}`);
+    return req().delete(`/api/v1/plants/${plantId}/care-events/${careEventId}`);
   }
 
   describe('create', () => {
@@ -809,12 +832,12 @@ describe('care events (POST/GET/PATCH/DELETE /api/v1/plants/:plantId/care-events
 
 describe('GET /api/v1/plants/:plantId/readings/latest', () => {
   it('returns 404 for a nonexistent plant', async () => {
-    const res = await request(app).get(`/api/v1/plants/${randomUUID()}/readings/latest`);
+    const res = await req().get(`/api/v1/plants/${randomUUID()}/readings/latest`);
     expect(res.status).toBe(404);
   });
 
   it('returns a documented empty result for a plant with no readings', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings/latest`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings/latest`);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ reading: null });
   });
@@ -824,7 +847,7 @@ describe('GET /api/v1/plants/:plantId/readings/latest', () => {
     const newest = await createReading({ recordedAt: new Date('2026-01-03T00:00:00Z') });
     await createReading({ recordedAt: new Date('2026-01-02T00:00:00Z') });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings/latest`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings/latest`);
 
     expect(res.status).toBe(200);
     expect(res.body.reading.id).toBe(newest.id);
@@ -844,7 +867,7 @@ describe('GET /api/v1/plants/:plantId/readings/latest', () => {
       receivedAt: new Date('2026-01-02T01:00:00Z'),
     });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings/latest`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings/latest`);
 
     expect(res.status).toBe(200);
     expect(res.body.reading.id).toBe(realtime.id);
@@ -857,7 +880,7 @@ describe('GET /api/v1/plants/:plantId/readings/latest', () => {
       recordedAt: new Date('2026-01-01T12:00:00.000Z'),
     });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings/latest`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings/latest`);
 
     expect(res.status).toBe(200);
     expect(res.body.reading).toMatchObject({
@@ -872,12 +895,12 @@ describe('GET /api/v1/plants/:plantId/readings/latest', () => {
 
 describe('GET /api/v1/plants/:plantId/moisture-trend', () => {
   it('returns 404 for a nonexistent plant', async () => {
-    const res = await request(app).get(`/api/v1/plants/${randomUUID()}/moisture-trend`);
+    const res = await req().get(`/api/v1/plants/${randomUUID()}/moisture-trend`);
     expect(res.status).toBe(404);
   });
 
   it('returns INSUFFICIENT_DATA for a plant with no readings', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/moisture-trend`);
+    const res = await req().get(`/api/v1/plants/${plantId}/moisture-trend`);
     expect(res.status).toBe(200);
     expect(res.body.trend).toMatchObject({ direction: 'INSUFFICIENT_DATA', readingCount: 0 });
   });
@@ -887,7 +910,7 @@ describe('GET /api/v1/plants/:plantId/moisture-trend', () => {
     await createReading({ recordedAt: new Date(Date.now() - 1 * 60 * 60 * 1000), moisturePercent: 45 });
     await createReading({ recordedAt: new Date(), moisturePercent: 60 });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/moisture-trend`);
+    const res = await req().get(`/api/v1/plants/${plantId}/moisture-trend`);
 
     expect(res.status).toBe(200);
     expect(res.body.trend.direction).toBe('INCREASING');
@@ -896,7 +919,7 @@ describe('GET /api/v1/plants/:plantId/moisture-trend', () => {
   });
 
   it('rejects a non-positive windowHours', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/moisture-trend?windowHours=-1`);
+    const res = await req().get(`/api/v1/plants/${plantId}/moisture-trend?windowHours=-1`);
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
@@ -904,12 +927,12 @@ describe('GET /api/v1/plants/:plantId/moisture-trend', () => {
 
 describe('GET /api/v1/plants/:plantId/drying-rate', () => {
   it('returns 404 for a nonexistent plant', async () => {
-    const res = await request(app).get(`/api/v1/plants/${randomUUID()}/drying-rate`);
+    const res = await req().get(`/api/v1/plants/${randomUUID()}/drying-rate`);
     expect(res.status).toBe(404);
   });
 
   it('returns a single INSUFFICIENT_DATA period for a plant with no readings', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/drying-rate`);
+    const res = await req().get(`/api/v1/plants/${plantId}/drying-rate`);
     expect(res.status).toBe(200);
     expect(res.body.dryingRate.periods).toHaveLength(1);
     expect(res.body.dryingRate.periods[0].state).toBe('INSUFFICIENT_DATA');
@@ -921,7 +944,7 @@ describe('GET /api/v1/plants/:plantId/drying-rate', () => {
     await createReading({ recordedAt: new Date(Date.now() - 2 * 60 * 60 * 1000), moisturePercent: 50 });
     await createReading({ recordedAt: new Date(), moisturePercent: 40 });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/drying-rate`);
+    const res = await req().get(`/api/v1/plants/${plantId}/drying-rate`);
 
     expect(res.status).toBe(200);
     expect(res.body.dryingRate.periods).toHaveLength(1);
@@ -930,7 +953,7 @@ describe('GET /api/v1/plants/:plantId/drying-rate', () => {
   });
 
   it('rejects a non-positive periodDays', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/drying-rate?periodDays=0`);
+    const res = await req().get(`/api/v1/plants/${plantId}/drying-rate?periodDays=0`);
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
@@ -938,12 +961,12 @@ describe('GET /api/v1/plants/:plantId/drying-rate', () => {
 
 describe('GET /api/v1/plants/:plantId/readings', () => {
   it('returns 404 for a nonexistent plant', async () => {
-    const res = await request(app).get(`/api/v1/plants/${randomUUID()}/readings`);
+    const res = await req().get(`/api/v1/plants/${randomUUID()}/readings`);
     expect(res.status).toBe(404);
   });
 
   it('returns an empty list for a plant with no readings', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings`);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ readings: [] });
   });
@@ -953,7 +976,7 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
     const second = await createReading({ recordedAt: new Date('2026-01-02T00:00:00Z') });
     const third = await createReading({ recordedAt: new Date('2026-01-03T00:00:00Z') });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings`);
 
     expect(res.status).toBe(200);
     expect(res.body.readings.map((r: { id: string }) => r.id)).toEqual([
@@ -967,7 +990,7 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
     const first = await createReading({ recordedAt: new Date('2026-01-01T00:00:00Z') });
     const second = await createReading({ recordedAt: new Date('2026-01-02T00:00:00Z') });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings?sort=desc`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings?sort=desc`);
 
     expect(res.status).toBe(200);
     expect(res.body.readings.map((r: { id: string }) => r.id)).toEqual([second.id, first.id]);
@@ -978,7 +1001,7 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
     const inRange = await createReading({ recordedAt: new Date('2026-01-02T00:00:00Z') });
     const tooLate = await createReading({ recordedAt: new Date('2026-01-03T00:00:00Z') });
 
-    const res = await request(app)
+    const res = await req()
       .get(`/api/v1/plants/${plantId}/readings`)
       .query({ start: '2026-01-01T12:00:00Z', end: '2026-01-02T12:00:00Z' });
 
@@ -993,19 +1016,19 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
     const early = await createReading({ recordedAt: new Date('2026-01-01T00:00:00Z') });
     const late = await createReading({ recordedAt: new Date('2026-01-03T00:00:00Z') });
 
-    const fromStart = await request(app)
+    const fromStart = await req()
       .get(`/api/v1/plants/${plantId}/readings`)
       .query({ start: '2026-01-02T00:00:00Z' });
     expect(fromStart.body.readings.map((r: { id: string }) => r.id)).toEqual([late.id]);
 
-    const untilEnd = await request(app)
+    const untilEnd = await req()
       .get(`/api/v1/plants/${plantId}/readings`)
       .query({ end: '2026-01-02T00:00:00Z' });
     expect(untilEnd.body.readings.map((r: { id: string }) => r.id)).toEqual([early.id]);
   });
 
   it('rejects a start after end', async () => {
-    const res = await request(app)
+    const res = await req()
       .get(`/api/v1/plants/${plantId}/readings`)
       .query({ start: '2026-01-02T00:00:00Z', end: '2026-01-01T00:00:00Z' });
 
@@ -1013,7 +1036,7 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
   });
 
   it('rejects a malformed start timestamp', async () => {
-    const res = await request(app)
+    const res = await req()
       .get(`/api/v1/plants/${plantId}/readings`)
       .query({ start: 'not-a-date' });
 
@@ -1028,20 +1051,20 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
       await createReading({ recordedAt: new Date(Date.UTC(2026, 0, i + 1)) });
     }
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings`).query({ limit: 2 });
+    const res = await req().get(`/api/v1/plants/${plantId}/readings`).query({ limit: 2 });
 
     expect(res.status).toBe(200);
     expect(res.body.readings).toHaveLength(2);
   });
 
   it('rejects a limit above the documented maximum', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings`).query({ limit: 1001 });
+    const res = await req().get(`/api/v1/plants/${plantId}/readings`).query({ limit: 1001 });
 
     expect(res.status).toBe(400);
   });
 
   it('rejects a limit of zero or negative', async () => {
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings`).query({ limit: 0 });
+    const res = await req().get(`/api/v1/plants/${plantId}/readings`).query({ limit: 0 });
     expect(res.status).toBe(400);
   });
 
@@ -1049,7 +1072,7 @@ describe('GET /api/v1/plants/:plantId/readings', () => {
     await createReading({ rawMoisture: 1500, moisturePercent: 30.1 });
     await createReading({ rawMoisture: 2500, moisturePercent: 60.9 });
 
-    const res = await request(app).get(`/api/v1/plants/${plantId}/readings`);
+    const res = await req().get(`/api/v1/plants/${plantId}/readings`);
 
     expect(res.status).toBe(200);
     expect(res.body.readings).toHaveLength(2);

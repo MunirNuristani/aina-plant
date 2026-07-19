@@ -7,6 +7,7 @@ import { requestIdMiddleware, REQUEST_ID_HEADER } from './request-id';
 import { getRequestId } from '../lib/request-context';
 import { createLogger, logger } from '../lib/logger';
 import { createApp } from '../app';
+import { createTestUserAndToken } from '../test-helpers/auth';
 
 function captureStream() {
   const chunks: string[] = [];
@@ -133,7 +134,11 @@ describe('request IDs in the real app', () => {
   });
 
   it('includes the request ID in a validation error response', async () => {
-    const res = await request(app).get('/api/v1/readings/recent').query({ limit: -1 });
+    const { token } = await createTestUserAndToken();
+    const res = await request(app)
+      .get('/api/v1/readings/recent')
+      .query({ limit: -1 })
+      .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(400);
     expect(res.body.error.requestId).toBe(res.headers[REQUEST_ID_HEADER.toLowerCase()]);

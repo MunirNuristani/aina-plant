@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { userAuthMiddleware } from '../middleware/user-auth';
 import {
   assignDeviceSchema,
   createDeviceSchema,
@@ -12,10 +13,15 @@ import {
   rotateDeviceCredential,
   updateDeviceConfig,
 } from '../services/device-service';
-import { toFieldErrors, ValidationError } from '../http/errors';
+import { toFieldErrors, UnauthorizedError, ValidationError } from '../http/errors';
 
 export const devicesRouter = Router();
 
+// POST /auth is the device's own self-auth (identifier + credential
+// headers), not a human user -- deliberately left without
+// userAuthMiddleware. Every other route below is human-facing and gated
+// per-route (this router can't go router-level like plantsRouter, since
+// it mixes both audiences).
 devicesRouter.post('/auth', async (req, res) => {
   const parsed = deviceAuthSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -26,7 +32,11 @@ devicesRouter.post('/auth', async (req, res) => {
   res.status(200).json({ device });
 });
 
-devicesRouter.post('/', async (req, res) => {
+devicesRouter.post('/', userAuthMiddleware, async (req, res) => {
+  if (!req.user) {
+    throw new UnauthorizedError('Authentication required');
+  }
+
   const parsed = createDeviceSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new ValidationError(
@@ -35,11 +45,15 @@ devicesRouter.post('/', async (req, res) => {
     );
   }
 
-  const result = await registerDevice(parsed.data);
+  const result = await registerDevice(parsed.data, req.user.id);
   res.status(201).json(result);
 });
 
-devicesRouter.patch('/:id', async (req, res) => {
+devicesRouter.patch('/:id', userAuthMiddleware, async (req, res) => {
+  if (!req.user) {
+    throw new UnauthorizedError('Authentication required');
+  }
+
   const parsed = updateDeviceConfigSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new ValidationError(
@@ -48,16 +62,24 @@ devicesRouter.patch('/:id', async (req, res) => {
     );
   }
 
-  const device = await updateDeviceConfig(req.params.id, parsed.data);
+  const device = await updateDeviceConfig(req.params.id, req.user.id, parsed.data);
   res.status(200).json(device);
 });
 
-devicesRouter.post('/:id/rotate-credential', async (req, res) => {
-  const result = await rotateDeviceCredential(req.params.id);
+devicesRouter.post('/:id/rotate-credential', userAuthMiddleware, async (req, res) => {
+  if (!req.user) {
+    throw new UnauthorizedError('Authentication required');
+  }
+
+  const result = await rotateDeviceCredential(req.params.id, req.user.id);
   res.status(200).json(result);
 });
 
-devicesRouter.post('/:id/assign', async (req, res) => {
+devicesRouter.post('/:id/assign', userAuthMiddleware, async (req, res) => {
+  if (!req.user) {
+    throw new UnauthorizedError('Authentication required');
+  }
+
   const parsed = assignDeviceSchema.safeParse(req.body);
   if (!parsed.success) {
     throw new ValidationError('Invalid assignment payload', toFieldErrors(parsed.error.issues));
@@ -67,6 +89,7 @@ devicesRouter.post('/:id/assign', async (req, res) => {
     req.params.id,
     parsed.data.plantId,
     parsed.data.reassign,
+    req.user.id,
   );
   res.status(200).json(device);
 });

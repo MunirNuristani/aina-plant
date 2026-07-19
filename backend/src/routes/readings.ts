@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { deviceAuthMiddleware } from '../middleware/device-auth';
+import { userAuthMiddleware } from '../middleware/user-auth';
 import { sensorReadingSchema } from '../validation/reading';
 import { recentReadingsQuerySchema } from '../validation/recent-readings-query';
 import { ingestReading, listRecentReadings } from '../services/reading-service';
@@ -28,12 +29,16 @@ readingsRouter.post('/', deviceAuthMiddleware, async (req, res) => {
   res.status(result.status === 'created' ? 201 : 200).json(result);
 });
 
-readingsRouter.get('/recent', async (req, res) => {
+readingsRouter.get('/recent', userAuthMiddleware, async (req, res) => {
+  if (!req.user) {
+    throw new UnauthorizedError('Authentication required');
+  }
+
   const parsed = recentReadingsQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     throw new ValidationError('Invalid query parameters', toFieldErrors(parsed.error.issues));
   }
 
-  const readings = await listRecentReadings(parsed.data.limit);
+  const readings = await listRecentReadings(parsed.data.limit, req.user.id);
   res.status(200).json({ readings });
 });

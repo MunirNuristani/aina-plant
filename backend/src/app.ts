@@ -1,9 +1,11 @@
 import express, { Application } from 'express';
+import { authRouter } from './routes/auth';
 import { devicesRouter } from './routes/devices';
 import { readingsRouter } from './routes/readings';
 import { plantsRouter } from './routes/plants';
 import { healthRouter } from './routes/health';
 import { requestIdMiddleware } from './middleware/request-id';
+import { userAuthMiddleware } from './middleware/user-auth';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 
 export function createApp(): Application {
@@ -17,10 +19,11 @@ export function createApp(): Application {
   app.use(express.json());
 
   app.use('/api/v1/health', healthRouter);
+  app.use('/api/v1/auth', authRouter);
 
   app.use('/api/v1/devices', devicesRouter);
   app.use('/api/v1/readings', readingsRouter);
-  app.use('/api/v1/plants', plantsRouter);
+  app.use('/api/v1/plants', userAuthMiddleware, plantsRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

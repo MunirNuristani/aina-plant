@@ -6,6 +6,7 @@ import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
 import { logger } from '../lib/logger';
 import { AppError } from '../http/errors';
+import { createTestUserAndToken } from '../test-helpers/auth';
 import { deviceAuthMiddleware } from './device-auth';
 
 function buildTestApp() {
@@ -32,6 +33,7 @@ const SECRET = 'correct-test-secret';
 let identifier: string;
 
 beforeEach(async () => {
+  const { userId } = await createTestUserAndToken();
   identifier = `test-device-${randomUUID()}`;
   await prisma.device.create({
     data: {
@@ -39,6 +41,7 @@ beforeEach(async () => {
       identifier,
       credentialHash: hashDeviceCredential(SECRET),
       enabled: true,
+      userId,
     },
   });
 });

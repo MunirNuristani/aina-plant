@@ -4,11 +4,12 @@
 // getMoistureTrendForPlant() (the database-touching wrapper) has its own,
 // much smaller test block further down, since it needs a real database.
 
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
 import { NotFoundError } from '../http/errors';
+import { createTestUserAndToken } from '../test-helpers/auth';
 import {
   analyzeMoistureTrend,
   getMoistureTrendForPlant,
@@ -190,6 +191,11 @@ describe('analyzeMoistureTrend', () => {
 describe('getMoistureTrendForPlant', () => {
   const createdPlantIds: string[] = [];
   const createdDeviceIds: string[] = [];
+  let userId: string;
+
+  beforeEach(async () => {
+    ({ userId } = await createTestUserAndToken());
+  });
 
   afterEach(async () => {
     if (createdDeviceIds.length > 0) {
@@ -208,7 +214,9 @@ describe('getMoistureTrendForPlant', () => {
   });
 
   async function createPlantWithDevice() {
-    const plant = await prisma.plant.create({ data: { name: 'Moisture Trend Test Plant' } });
+    const plant = await prisma.plant.create({
+      data: { name: 'Moisture Trend Test Plant', userId },
+    });
     createdPlantIds.push(plant.id);
 
     const device = await prisma.device.create({
@@ -218,6 +226,7 @@ describe('getMoistureTrendForPlant', () => {
         credentialHash: hashDeviceCredential('unused'),
         enabled: true,
         plantId: plant.id,
+        userId,
       },
     });
     createdDeviceIds.push(device.id);
@@ -249,7 +258,7 @@ describe('getMoistureTrendForPlant', () => {
     await createReading(device.id, plant.id, 1, 45);
     await createReading(device.id, plant.id, 0, 60);
 
-    const result = await getMoistureTrendForPlant(plant.id);
+    const result = await getMoistureTrendForPlant(plant.id, userId);
 
     expect(result.direction).toBe('INCREASING');
     expect(result.readingCount).toBe(3);
@@ -263,7 +272,7 @@ describe('getMoistureTrendForPlant', () => {
     await createReading(device.id, plant.id, 1, 45);
     await createReading(device.id, plant.id, 0, 60);
 
-    const result = await getMoistureTrendForPlant(plant.id, 24);
+    const result = await getMoistureTrendForPlant(plant.id, userId, 24);
 
     expect(result.readingCount).toBe(3);
     expect(result.earliest?.moisturePercent).toBe(30);
@@ -271,7 +280,7 @@ describe('getMoistureTrendForPlant', () => {
 
   it('returns insufficient data for a plant with no readings', async () => {
     const { plant } = await createPlantWithDevice();
-    const result = await getMoistureTrendForPlant(plant.id);
+    const result = await getMoistureTrendForPlant(plant.id, userId);
     expect(result.direction).toBe('INSUFFICIENT_DATA');
     expect(result.readingCount).toBe(0);
   });
@@ -282,14 +291,14 @@ describe('getMoistureTrendForPlant', () => {
     await createReading(device.id, plant.id, 3, 41);
     await createReading(device.id, plant.id, 1, 42);
 
-    const wideTolerance = await getMoistureTrendForPlant(plant.id, 24, 5);
+    const wideTolerance = await getMoistureTrendForPlant(plant.id, userId, 24, 5);
     expect(wideTolerance.direction).toBe('STABLE');
 
-    const narrowTolerance = await getMoistureTrendForPlant(plant.id, 24, 1);
+    const narrowTolerance = await getMoistureTrendForPlant(plant.id, userId, 24, 1);
     expect(narrowTolerance.direction).toBe('INCREASING');
   });
 
   it('throws NotFoundError for a nonexistent plant', async () => {
-    await expect(getMoistureTrendForPlant(randomUUID())).rejects.toThrow(NotFoundError);
+    await expect(getMoistureTrendForPlant(randomUUID(), userId)).rejects.toThrow(NotFoundError);
   });
 });

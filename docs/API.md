@@ -23,18 +23,46 @@ production base URL yet.
 
 ### Authentication
 
-Two different authentication schemes exist, used by different kinds of
-caller:
+Two independent authentication schemes exist, for two different kinds of
+caller — a device authenticates itself once per reading submission; a
+human authenticates once (at login) and reuses that token for everything
+else:
 
 - **Device authentication** (`X-Device-Id` / `X-Device-Key` headers) —
   used by `POST /api/v1/readings`, the one endpoint an ESP32 device
   itself calls. See "Device authentication" below.
-- **No authentication** — every other endpoint in this document
-  (device registration/management, all of `/api/v1/plants/*`) currently
-  requires no credentials at all. This is accurate as of this MVP, not an
-  omission from this document: there is no admin-user auth layer built
-  yet. Treat these as trusted-network/internal endpoints until one
-  exists — don't expose them on a public, unauthenticated network.
+- **User authentication** (`Authorization: Bearer <token>`) — used by
+  every device-management endpoint (`POST /api/v1/devices`,
+  `PATCH /api/v1/devices/:id`, `POST /api/v1/devices/:id/rotate-credential`,
+  `POST /api/v1/devices/:id/assign`), every endpoint under
+  `/api/v1/plants/*`, and `GET /api/v1/readings/recent`. See "User
+  authentication" below. `POST /api/v1/devices/auth` (a device's own
+  self-auth check) is the one exception under `/devices` — it needs
+  neither scheme.
+- **No authentication** — `GET /api/v1/health`, `POST /api/v1/auth/signup`,
+  `POST /api/v1/auth/login`, and `POST /api/v1/devices/auth`.
+
+Every plant and device is owned by exactly one user (see the `userId`
+field on both in the response bodies below). A caller only ever sees
+their own plants/devices/readings/care-events — a valid token for a
+*different* user's resource gets a `404`, identical to the resource not
+existing at all (never a `403`, which would confirm to an attacker that a
+guessed ID is real).
+
+#### User authentication
+
+```text
+Authorization: Bearer <JWT>
+```
+
+Obtain a token via `POST /api/v1/auth/signup` or `POST /api/v1/auth/login`
+(see "Auth" below) — both return a `token` alongside the created/found
+`user`. The token is a JWT (HS256), currently valid for 30 days; there is
+no refresh mechanism yet, and no `/logout` endpoint (it's stateless — a
+client just discards the token).
+
+Failure modes: `401` if the header is missing, malformed, or the token is
+invalid/expired/signed with the wrong key.
 
 #### Device authentication
 
@@ -77,8 +105,9 @@ Every error response (any 4xx/5xx) has this shape:
 
 - `code` — a stable machine-readable string. One of `VALIDATION_ERROR`
   (400), `UNAUTHORIZED` (401), `FORBIDDEN` (403), `NOT_FOUND` (404),
-  `CONFLICT` (409), or `INTERNAL_ERROR` (500, an unexpected/unhandled
-  failure — see "Database failures" below).
+  `CONFLICT` (409), `TOO_MANY_REQUESTS` (429, `POST /api/v1/auth/login`
+  only — see "Auth" below), or `INTERNAL_ERROR` (500, an
+  unexpected/unhandled failure — see "Database failures" below).
 - `message` — human-readable, safe to show a developer, not necessarily
   safe to show an end user verbatim.
 - `requestId` — echoes the `X-Request-Id` response header (see
@@ -140,10 +169,84 @@ endpoint always returns a flat body regardless of status.
 
 ---
 
+## Auth
+
+Human account creation and login. Open self-signup — no invite or
+approval flow. Neither endpoint requires authentication.
+
+### `POST /api/v1/auth/signup`
+
+#### Request body
+
+| Field      | Type   | Required | Notes                                                  |
+| ---------- | ------ | :------: | ------------------------------------------------------- |
+| `email`    | string |    ✓     | Normalized to lowercase server-side before storage/lookup. |
+| `password` | string |    ✓     | Minimum 8 characters. No complexity requirement.       |
+| `name`     | string |          | 1–100 characters.                                      |
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/signup \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "person@example.com", "password": "correct-horse-battery", "name": "Person"}'
+```
+
+#### `201` response
+
+```json
+{
+  "user": {
+    "id": "0361ffa6-25ef-4285-bfa4-94724c32d1ce",
+    "email": "person@example.com",
+    "name": "Person",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+#### Errors
+
+| Status | Condition                                    |
+| ------ | --------------------------------------------- |
+| `400`  | Validation failure (see field table above).   |
+| `409`  | `email` is already registered.                |
+
+### `POST /api/v1/auth/login`
+
+Rate-limited (per source IP, in-memory — resets on process restart; not
+shared across instances) to guard against credential-stuffing on a
+publicly reachable endpoint.
+
+#### Request body
+
+`email` (string, required), `password` (string, required).
+
+```bash
+curl -X POST http://localhost:3000/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email": "person@example.com", "password": "correct-horse-battery"}'
+```
+
+#### `200` response
+
+Same shape as signup's `201` response: `{ "user": {...}, "token": "..." }`.
+
+#### Errors
+
+| Status | Condition                                                                                      |
+| ------ | ----------------------------------------------------------------------------------------------- |
+| `401`  | Unknown email, or wrong password — deliberately the same error for both, to avoid confirming which registered emails exist. |
+| `429`  | Too many login attempts from this source in the current window.                                 |
+
+---
+
 ## Devices
 
-Device registration and management. No authentication on any endpoint in
-this section (see "Authentication" above).
+Device registration and management. Every endpoint in this section
+except `POST /api/v1/devices/auth` requires **user authentication** (see
+"Authentication" above) — a device is created under, and only visible
+to, the user that registered it.
 
 ### `POST /api/v1/devices`
 
@@ -160,6 +263,7 @@ Registers a new device and issues its credential. `FR-DEVICE-001`.
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/devices \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"name": "Balcony ESP32", "identifier": "esp32-balcony-01"}'
 ```
@@ -181,17 +285,22 @@ it means rotating it (see `POST /api/v1/devices/:id/rotate-credential`).
     "firmwareVersion": null,
     "lastSeenAt": null,
     "createdAt": "2026-01-01T00:00:00.000Z",
+    "userId": "0361ffa6-25ef-4285-bfa4-94724c32d1ce",
     "plantId": null
   },
   "credential": "3f9a2b1c...64 hex characters..."
 }
 ```
 
+`userId` is the authenticated caller's own `id` — the device that gets
+created is always owned by whoever's token was used.
+
 #### Errors
 
 | Status | Condition                                             |
 | ------ | ----------------------------------------------------- |
 | `400`  | Validation failure (see field table above).           |
+| `401`  | Missing/invalid `Authorization` header.                |
 | `409`  | `identifier` is already registered to another device. |
 
 ### `PATCH /api/v1/devices/:id`
@@ -207,6 +316,7 @@ Any of: `name` (string, 1–100 chars), `firmwareVersion` (string, or
 
 ```bash
 curl -X PATCH http://localhost:3000/api/v1/devices/3fa85f64-5717-4562-b3fc-2c963f66afa6 \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"reportingIntervalSeconds": 300, "enabled": false}'
 ```
@@ -221,7 +331,8 @@ field, no `credential`).
 | Status | Condition                                                                               |
 | ------ | --------------------------------------------------------------------------------------- |
 | `400`  | Validation failure, or an empty body (`(root)`: "At least one field must be provided"). |
-| `404`  | No device with that `id`.                                                               |
+| `401`  | Missing/invalid `Authorization` header.                                                 |
+| `404`  | No device with that `id` **belonging to the authenticated user**.                       |
 
 ### `POST /api/v1/devices/:id/rotate-credential`
 
@@ -234,7 +345,8 @@ new `id` and orphan its reading history's `deviceId` references.
 No request body.
 
 ```bash
-curl -X POST http://localhost:3000/api/v1/devices/3fa85f64-5717-4562-b3fc-2c963f66afa6/rotate-credential
+curl -X POST http://localhost:3000/api/v1/devices/3fa85f64-5717-4562-b3fc-2c963f66afa6/rotate-credential \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -244,9 +356,10 @@ Same shape as `POST /api/v1/devices`'s response: the new plaintext
 
 #### Errors
 
-| Status | Condition                 |
-| ------ | ------------------------- |
-| `404`  | No device with that `id`. |
+| Status | Condition                                                          |
+| ------ | ------------------------------------------------------------------- |
+| `401`  | Missing/invalid `Authorization` header.                             |
+| `404`  | No device with that `id` **belonging to the authenticated user**.   |
 
 ### `POST /api/v1/devices/:id/assign`
 
@@ -263,6 +376,7 @@ from the plant's side). `FR-DEVICE-002`.
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/devices/3fa85f64-5717-4562-b3fc-2c963f66afa6/assign \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"plantId": "9c858901-8a57-4791-81fe-4c455b099bc9"}'
 ```
@@ -276,7 +390,8 @@ The full updated device, `plantId` now set.
 | Status | Condition                                                                                                                                                                                                               |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `400`  | Validation failure.                                                                                                                                                                                                     |
-| `404`  | No device or no plant with the given ID.                                                                                                                                                                                |
+| `401`  | Missing/invalid `Authorization` header.                                                                                                                                                                                 |
+| `404`  | No device or no plant with the given ID **belonging to the authenticated user** — both sides are checked, so a real device/plant belonging to someone else 404s the same as a nonexistent one.                        |
 | `409`  | Device is disabled, **or** already assigned to a _different_ plant and `reassign` wasn't `true` — the response's `error.details` is `{ "currentPlantId": "..." }` in the latter case (not the usual field-error array). |
 
 Reassigning a device never touches its already-recorded readings — each
@@ -396,9 +511,9 @@ simulate -- --replay`).
 
 ### `GET /api/v1/readings/recent`
 
-The most recent readings across **all** plants/devices — an admin/global
-activity view, not scoped to one plant (contrast with
-`GET /api/v1/plants/:plantId/readings` below).
+The most recent readings across all of the **authenticated user's own**
+plants/devices — a personal "all my sensors" activity view, not scoped to
+one plant (contrast with `GET /api/v1/plants/:plantId/readings` below).
 
 #### Query parameters
 
@@ -407,7 +522,8 @@ activity view, not scoped to one plant (contrast with
 | `limit` | integer |  `50`   | 1–500. |
 
 ```bash
-curl "http://localhost:3000/api/v1/readings/recent?limit=10"
+curl "http://localhost:3000/api/v1/readings/recent?limit=10" \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -440,12 +556,17 @@ that):
 #### Errors
 
 | Status | Condition                                |
-| ------ | ---------------------------------------- |
+| ------ | ----------------------------------------- |
 | `400`  | `limit` is not a positive integer ≤ 500. |
+| `401`  | Missing/invalid `Authorization` header.  |
 
 ---
 
 ## Plants
+
+Every endpoint in this section requires **user authentication** (see
+"Authentication" above) and is scoped to the authenticated user's own
+plants.
 
 ### `POST /api/v1/plants`
 
@@ -465,6 +586,7 @@ Creates a plant profile. `FR-PLANT-001`.
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/plants \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"name": "Balcony Fern", "location": "Living room window"}'
 ```
@@ -483,23 +605,28 @@ curl -X POST http://localhost:3000/api/v1/plants \
     "potSize": null,
     "soilType": null,
     "createdAt": "2026-01-01T00:00:00.000Z",
-    "updatedAt": "2026-01-01T00:00:00.000Z"
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+    "userId": "0361ffa6-25ef-4285-bfa4-94724c32d1ce"
   }
 }
 ```
+
+`userId` is the authenticated caller's own `id`.
 
 #### Errors
 
 | Status | Condition                                   |
 | ------ | ------------------------------------------- |
 | `400`  | Missing/whitespace-only/over-length `name`. |
+| `401`  | Missing/invalid `Authorization` header.     |
 
 ### `GET /api/v1/plants`
 
-Lists every plant.
+Lists the authenticated user's own plants.
 
 ```bash
-curl http://localhost:3000/api/v1/plants
+curl http://localhost:3000/api/v1/plants \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -524,6 +651,7 @@ Device objects never include `credentialHash`.
       "soilType": null,
       "createdAt": "2026-01-01T00:00:00.000Z",
       "updatedAt": "2026-01-01T00:00:00.000Z",
+      "userId": "0361ffa6-25ef-4285-bfa4-94724c32d1ce",
       "devices": [
         {
           "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
@@ -540,7 +668,11 @@ Device objects never include `credentialHash`.
 }
 ```
 
-No error responses beyond the generic `500` case.
+#### Errors
+
+| Status | Condition                                |
+| ------ | ------------------------------------------ |
+| `401`  | Missing/invalid `Authorization` header.  |
 
 ### `GET /api/v1/plants/:plantId`
 
@@ -549,14 +681,16 @@ A single plant, by `id`. Same shape as one entry of the
 array), wrapped as `{ "plant": { ... } }`.
 
 ```bash
-curl http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9
+curl http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9 \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### Errors
 
 | Status | Condition                |
 | ------ | ------------------------ |
-| `404`  | No plant with that `id`. |
+| `401`  | Missing/invalid `Authorization` header.                          |
+| `404`  | No plant with that `id` belonging to the authenticated user.     |
 
 ### `POST /api/v1/plants/:plantId/device`
 
@@ -571,6 +705,7 @@ optional, default `false`).
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/device \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"deviceId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}'
 ```
@@ -591,7 +726,8 @@ time — a late-arriving buffered reading never shadows a genuinely more
 recent one just because it happened to reach the server first).
 
 ```bash
-curl http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/readings/latest
+curl http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/readings/latest \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -619,7 +755,8 @@ plant exists, it just has no data). Otherwise:
 
 | Status | Condition                |
 | ------ | ------------------------ |
-| `404`  | No plant with that `id`. |
+| `401`  | Missing/invalid `Authorization` header.                          |
+| `404`  | No plant with that `id` belonging to the authenticated user.     |
 
 ### `GET /api/v1/plants/:plantId/readings`
 
@@ -638,7 +775,8 @@ orders by `receivedAt` instead.
 | `limit` | integer |  `100`  | 1–1000.                                                                |
 
 ```bash
-curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/readings?start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00Z&sort=desc&limit=50"
+curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/readings?start=2026-01-01T00:00:00Z&end=2026-01-02T00:00:00Z&sort=desc&limit=50" \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -651,7 +789,8 @@ curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/r
 | Status | Condition                                                                |
 | ------ | ------------------------------------------------------------------------ |
 | `400`  | Malformed `start`/`end`, `start` after `end`, or invalid `limit`/`sort`. |
-| `404`  | No plant with that `id`.                                                 |
+| `401`  | Missing/invalid `Authorization` header.                          |
+| `404`  | No plant with that `id` belonging to the authenticated user.     |
 
 ---
 
@@ -659,7 +798,9 @@ curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/r
 
 Manually logged care actions (currently just watering) for a plant, kept
 so they can be compared against its moisture reading history.
-`FR-CARE-001`–`FR-CARE-004`.
+`FR-CARE-001`–`FR-CARE-004`. Every endpoint in this section requires
+**user authentication** (see "Authentication" above) and is scoped to
+plants owned by the authenticated user.
 
 ### `POST /api/v1/plants/:plantId/care-events`
 
@@ -675,6 +816,7 @@ so they can be compared against its moisture reading history.
 
 ```bash
 curl -X POST http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/care-events \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"type": "WATERING", "amount": 250, "unit": "ml", "notes": "morning watering"}'
 ```
@@ -702,7 +844,8 @@ curl -X POST http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b0
 | Status | Condition                                       |
 | ------ | ----------------------------------------------- |
 | `400`  | Missing/invalid `type`, or a negative `amount`. |
-| `404`  | No plant with that `id`.                        |
+| `401`  | Missing/invalid `Authorization` header.                          |
+| `404`  | No plant with that `id` belonging to the authenticated user.     |
 
 ### `GET /api/v1/plants/:plantId/care-events`
 
@@ -710,7 +853,8 @@ Lists a plant's care events, newest `occurredAt` first. Soft-deleted
 events (see the `DELETE` endpoint below) are never included.
 
 ```bash
-curl http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/care-events
+curl http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/care-events \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -722,7 +866,8 @@ curl http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/ca
 
 | Status | Condition                |
 | ------ | ------------------------ |
-| `404`  | No plant with that `id`. |
+| `401`  | Missing/invalid `Authorization` header.                          |
+| `404`  | No plant with that `id` belonging to the authenticated user.     |
 
 ### `PATCH /api/v1/plants/:plantId/care-events/:careEventId`
 
@@ -732,6 +877,7 @@ required.
 
 ```bash
 curl -X PATCH http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/care-events/b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"amount": 300, "notes": "topped up"}'
 ```
@@ -745,7 +891,8 @@ curl -X PATCH http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b
 | Status | Condition                                                                                                                                                                                              |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `400`  | Validation failure, or an empty body.                                                                                                                                                                  |
-| `404`  | No care event with that ID **belonging to that plant** — a mismatched `plantId`/`careEventId` pair 404s the same as either ID not existing at all. Also 404s for an event that's already soft-deleted. |
+| `401`  | Missing/invalid `Authorization` header.                                                                                                                                                                |
+| `404`  | No care event with that ID **belonging to that plant, owned by the authenticated user** — a mismatched `plantId`/`careEventId` pair, or a plant belonging to a different user, 404s the same as either ID not existing at all. Also 404s for an event that's already soft-deleted. |
 
 ### `DELETE /api/v1/plants/:plantId/care-events/:careEventId`
 
@@ -759,7 +906,8 @@ never existed).
 No request body.
 
 ```bash
-curl -X DELETE http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/care-events/b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e
+curl -X DELETE http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/care-events/b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `204` response
@@ -770,6 +918,7 @@ Empty body.
 
 | Status | Condition                                                                                |
 | ------ | ---------------------------------------------------------------------------------------- |
+| `401`  | Missing/invalid `Authorization` header.                                                  |
 | `404`  | No matching, not-already-deleted care event for that plant (same rule as `PATCH` above). |
 
 ---
@@ -779,7 +928,9 @@ Empty body.
 Derived, computed views over a plant's readings and care events — never
 raw data, and never fabricated where the underlying data doesn't support
 a verdict. Both endpoints below explicitly report when there isn't
-enough evidence rather than guessing. `FR-ANALYTICS-003`.
+enough evidence rather than guessing. `FR-ANALYTICS-003`. Both require
+**user authentication** (see "Authentication" above) and are scoped to
+plants owned by the authenticated user.
 
 ### `GET /api/v1/plants/:plantId/moisture-trend`
 
@@ -796,7 +947,8 @@ simple and easy to explain plainly to a user.
 | `windowHours` | number |  `24`   | How far back to look. Must be > 0. |
 
 ```bash
-curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/moisture-trend?windowHours=24"
+curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/moisture-trend?windowHours=24" \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -826,7 +978,8 @@ no fabricated change reported when there isn't enough evidence for one.
 | Status | Condition                                   |
 | ------ | -------------------------------------------- |
 | `400`  | `windowHours` present but not a number > 0.   |
-| `404`  | No plant with that `id`.                      |
+| `401`  | Missing/invalid `Authorization` header.                          |
+| `404`  | No plant with that `id` belonging to the authenticated user.     |
 
 ### `GET /api/v1/plants/:plantId/drying-rate`
 
@@ -844,7 +997,8 @@ window means exactly one period spanning the whole thing.
 | `periodDays` | number |   `7`   | How far back to look. Must be > 0. |
 
 ```bash
-curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/drying-rate?periodDays=7"
+curl "http://localhost:3000/api/v1/plants/9c858901-8a57-4791-81fe-4c455b099bc9/drying-rate?periodDays=7" \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
 ```
 
 #### `200` response
@@ -890,4 +1044,5 @@ signed delta.
 | Status | Condition                                    |
 | ------ | --------------------------------------------- |
 | `400`  | `periodDays` present but not a number > 0.     |
-| `404`  | No plant with that `id`.                       |
+| `401`  | Missing/invalid `Authorization` header.                          |
+| `404`  | No plant with that `id` belonging to the authenticated user.     |

@@ -17,6 +17,7 @@ function toPublicDevice(device: Device): PublicDevice {
 
 export async function registerDevice(
   input: CreateDeviceInput,
+  userId: string,
 ): Promise<{ device: PublicDevice; credential: string }> {
   const { secret, hash } = generateDeviceCredential();
 
@@ -29,6 +30,7 @@ export async function registerDevice(
         reportingIntervalSeconds:
           input.reportingIntervalSeconds ?? DEFAULT_REPORTING_INTERVAL_SECONDS,
         credentialHash: hash,
+        userId,
       },
     });
 
@@ -43,9 +45,10 @@ export async function registerDevice(
 
 export async function updateDeviceConfig(
   deviceId: string,
+  userId: string,
   input: UpdateDeviceConfigInput,
 ): Promise<PublicDevice> {
-  const existing = await prisma.device.findUnique({ where: { id: deviceId } });
+  const existing = await prisma.device.findFirst({ where: { id: deviceId, userId } });
   if (!existing) {
     throw new NotFoundError('Device not found');
   }
@@ -70,8 +73,9 @@ export async function updateDeviceConfig(
 // here, and never persisted -- only its hash is stored.
 export async function rotateDeviceCredential(
   deviceId: string,
+  userId: string,
 ): Promise<{ device: PublicDevice; credential: string }> {
-  const existing = await prisma.device.findUnique({ where: { id: deviceId } });
+  const existing = await prisma.device.findFirst({ where: { id: deviceId, userId } });
   if (!existing) {
     throw new NotFoundError('Device not found');
   }
@@ -90,13 +94,17 @@ export async function assignDeviceToPlant(
   deviceId: string,
   plantId: string,
   reassign: boolean,
+  userId: string,
 ): Promise<PublicDevice> {
-  const device = await prisma.device.findUnique({ where: { id: deviceId } });
+  // Both sides scoped to the caller -- neither a device nor a plant
+  // belonging to a different user can be assigned to each other, even if
+  // both happen to belong to the *same* other user.
+  const device = await prisma.device.findFirst({ where: { id: deviceId, userId } });
   if (!device) {
     throw new NotFoundError('Device not found');
   }
 
-  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  const plant = await prisma.plant.findFirst({ where: { id: plantId, userId } });
   if (!plant) {
     throw new NotFoundError('Plant not found');
   }

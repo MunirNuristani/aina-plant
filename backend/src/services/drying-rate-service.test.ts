@@ -5,11 +5,12 @@
 // wrapper) has its own, much smaller test block further down, since it
 // needs a real database.
 
-import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
 import { NotFoundError } from '../http/errors';
+import { createTestUserAndToken } from '../test-helpers/auth';
 import {
   analyzeDryingRate,
   getDryingRateForPlant,
@@ -335,6 +336,11 @@ describe('analyzeDryingRate', () => {
 describe('getDryingRateForPlant', () => {
   const createdPlantIds: string[] = [];
   const createdDeviceIds: string[] = [];
+  let userId: string;
+
+  beforeEach(async () => {
+    ({ userId } = await createTestUserAndToken());
+  });
 
   afterEach(async () => {
     if (createdDeviceIds.length > 0) {
@@ -354,7 +360,9 @@ describe('getDryingRateForPlant', () => {
   });
 
   async function createPlantWithDevice() {
-    const plant = await prisma.plant.create({ data: { name: 'Drying Rate Test Plant' } });
+    const plant = await prisma.plant.create({
+      data: { name: 'Drying Rate Test Plant', userId },
+    });
     createdPlantIds.push(plant.id);
 
     const device = await prisma.device.create({
@@ -364,6 +372,7 @@ describe('getDryingRateForPlant', () => {
         credentialHash: hashDeviceCredential('unused'),
         enabled: true,
         plantId: plant.id,
+        userId,
       },
     });
     createdDeviceIds.push(device.id);
@@ -405,7 +414,7 @@ describe('getDryingRateForPlant', () => {
     await createReading(device.id, plant.id, 2, 50);
     await createReading(device.id, plant.id, 0, 40);
 
-    const result = await getDryingRateForPlant(plant.id);
+    const result = await getDryingRateForPlant(plant.id, userId);
 
     expect(result.periods).toHaveLength(1);
     expect(result.periods[0].state).toBe('VALID');
@@ -421,7 +430,7 @@ describe('getDryingRateForPlant', () => {
     await createReading(device.id, plant.id, 4, 80);
     await createReading(device.id, plant.id, 0, 70);
 
-    const result = await getDryingRateForPlant(plant.id);
+    const result = await getDryingRateForPlant(plant.id, userId);
 
     expect(result.periods).toHaveLength(2);
     expect(result.periods[0].state).toBe('VALID');
@@ -439,18 +448,18 @@ describe('getDryingRateForPlant', () => {
       data: { deletedAt: new Date() },
     });
 
-    const result = await getDryingRateForPlant(plant.id);
+    const result = await getDryingRateForPlant(plant.id, userId);
 
     expect(result.periods).toHaveLength(1);
   });
 
   it('returns insufficient data for a plant with no readings', async () => {
     const { plant } = await createPlantWithDevice();
-    const result = await getDryingRateForPlant(plant.id);
+    const result = await getDryingRateForPlant(plant.id, userId);
     expect(result.periods[0].state).toBe('INSUFFICIENT_DATA');
   });
 
   it('throws NotFoundError for a nonexistent plant', async () => {
-    await expect(getDryingRateForPlant(randomUUID())).rejects.toThrow(NotFoundError);
+    await expect(getDryingRateForPlant(randomUUID(), userId)).rejects.toThrow(NotFoundError);
   });
 });

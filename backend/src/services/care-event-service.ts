@@ -5,9 +5,10 @@ import type { CreateCareEventInput, UpdateCareEventInput } from '../validation/c
 
 export async function createCareEvent(
   plantId: string,
+  userId: string,
   input: CreateCareEventInput,
 ): Promise<CareEvent> {
-  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  const plant = await prisma.plant.findFirst({ where: { id: plantId, userId } });
   if (!plant) {
     throw new NotFoundError('Plant not found');
   }
@@ -27,8 +28,8 @@ export async function createCareEvent(
 // Excludes soft-deleted rows (deletedAt: null) -- see CareEvent's schema
 // comment: every read query against this model must filter that itself,
 // there's no declarative way to make Prisma do it automatically.
-export async function listCareEventsForPlant(plantId: string): Promise<CareEvent[]> {
-  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+export async function listCareEventsForPlant(plantId: string, userId: string): Promise<CareEvent[]> {
+  const plant = await prisma.plant.findFirst({ where: { id: plantId, userId } });
   if (!plant) {
     throw new NotFoundError('Plant not found');
   }
@@ -44,10 +45,16 @@ export async function listCareEventsForPlant(plantId: string): Promise<CareEvent
 // actually belongs to that plant; a mismatched plantId is treated the
 // same as a nonexistent event (404), not silently ignored. Also excludes
 // already-soft-deleted rows, so updating (or deleting) a deleted event
-// correctly 404s rather than reviving it.
-async function findActiveCareEvent(plantId: string, careEventId: string): Promise<CareEvent> {
+// correctly 404s rather than reviving it. Ownership is checked through
+// the parent plant's userId (a relation filter, not a separate lookup) --
+// CareEvent has no userId of its own; see schema.prisma's comment on why.
+async function findActiveCareEvent(
+  plantId: string,
+  careEventId: string,
+  userId: string,
+): Promise<CareEvent> {
   const event = await prisma.careEvent.findFirst({
-    where: { id: careEventId, plantId, deletedAt: null },
+    where: { id: careEventId, plantId, deletedAt: null, plant: { userId } },
   });
   if (!event) {
     throw new NotFoundError('Care event not found');
@@ -58,9 +65,10 @@ async function findActiveCareEvent(plantId: string, careEventId: string): Promis
 export async function updateCareEvent(
   plantId: string,
   careEventId: string,
+  userId: string,
   input: UpdateCareEventInput,
 ): Promise<CareEvent> {
-  await findActiveCareEvent(plantId, careEventId);
+  await findActiveCareEvent(plantId, careEventId, userId);
 
   return prisma.careEvent.update({
     where: { id: careEventId },
@@ -76,8 +84,12 @@ export async function updateCareEvent(
 
 // Soft delete only -- see CareEvent's schema comment for why an actual
 // DELETE would silently rewrite moisture-history comparisons.
-export async function deleteCareEvent(plantId: string, careEventId: string): Promise<void> {
-  await findActiveCareEvent(plantId, careEventId);
+export async function deleteCareEvent(
+  plantId: string,
+  careEventId: string,
+  userId: string,
+): Promise<void> {
+  await findActiveCareEvent(plantId, careEventId, userId);
 
   await prisma.careEvent.update({
     where: { id: careEventId },

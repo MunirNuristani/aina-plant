@@ -114,10 +114,11 @@ export function analyzeMoistureTrend(
 // specifically so the calculation itself can be unit-tested without one.
 export async function getMoistureTrendForPlant(
   plantId: string,
+  userId: string,
   windowHours: number = DEFAULT_ANALYSIS_WINDOW_HOURS,
   stableTolerancePercent: number = DEFAULT_STABLE_TOLERANCE_PERCENT,
 ): Promise<MoistureTrendResult> {
-  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  const plant = await prisma.plant.findFirst({ where: { id: plantId, userId } });
   if (!plant) {
     throw new NotFoundError('Plant not found');
   }

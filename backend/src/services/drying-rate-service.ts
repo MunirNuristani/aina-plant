@@ -234,11 +234,12 @@ export function analyzeDryingRate(
 // one.
 export async function getDryingRateForPlant(
   plantId: string,
+  userId: string,
   periodDays: number = DEFAULT_ANALYSIS_PERIOD_DAYS,
   maxGapHours?: number,
   minReadingsPerPeriod?: number,
 ): Promise<DryingRateAnalysis> {
-  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  const plant = await prisma.plant.findFirst({ where: { id: plantId, userId } });
   if (!plant) {
     throw new NotFoundError('Plant not found');
   }

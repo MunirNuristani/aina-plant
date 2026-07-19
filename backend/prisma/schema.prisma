@@ -12,6 +12,28 @@ datasource db {
   provider = "postgresql"
 }
 
+// A human account. Every Plant and Device is owned by exactly one User --
+// devices get their own userId (not just inherited via Plant) because
+// Device.plantId is nullable: an unassigned device would otherwise have no
+// derivable owner. SensorReading/CareEvent/Calibration deliberately do NOT
+// get their own userId -- every service function that touches them already
+// looks up the parent Plant/Device first, so ownership stays derived
+// through that existing lookup rather than being duplicated.
+model User {
+  id           String   @id @default(uuid())
+  // Always stored lowercase-normalized by the application layer -- Postgres
+  // unique constraints are case-sensitive by default, and this project has
+  // no reason to reach for citext.
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  plants  Plant[]
+  devices Device[]
+}
+
 model Plant {
   id             String   @id @default(uuid())
   name           String   @db.VarChar(100)
@@ -24,9 +46,14 @@ model Plant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
   devices    Device[]
   readings   SensorReading[]
   careEvents CareEvent[]
+
+  @@index([userId])
 }
 
 model Device {
@@ -40,6 +67,9 @@ model Device {
   lastSeenAt               DateTime?
   createdAt                DateTime  @default(now())
 
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
   plantId String?
   plant   Plant?  @relation(fields: [plantId], references: [id])
 
@@ -47,6 +77,7 @@ model Device {
   calibrations Calibration[]
 
   @@index([plantId])
+  @@index([userId])
 }
 
 model SensorReading {

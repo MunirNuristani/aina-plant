@@ -85,8 +85,23 @@ export type DryingRateAnalysis = {
 export type ApiErrorDetail = { field: string; message: string };
 
 export type ApiError = {
-  code: "VALIDATION_ERROR" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "INTERNAL_ERROR";
+  code:
+    | "VALIDATION_ERROR"
+    | "UNAUTHORIZED"
+    | "FORBIDDEN"
+    | "NOT_FOUND"
+    | "CONFLICT"
+    | "TOO_MANY_REQUESTS"
+    | "INTERNAL_ERROR";
   message: string;
   requestId?: string;
   details?: ApiErrorDetail[] | Record<string, unknown>;
+};
+
+export type User = {
+  id: string;
+  email: string;
+  name: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

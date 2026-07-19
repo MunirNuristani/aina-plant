@@ -14,12 +14,14 @@ import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
 import { logger } from '../lib/logger';
 import { ConflictError, ValidationError } from '../http/errors';
+import { createTestUserAndToken } from '../test-helpers/auth';
 import { ingestReading } from './reading-service';
 import type { PublicDevice } from './device-service';
 import type { SensorReadingInput } from '../validation/reading';
 
 let plantId: string;
 let device: PublicDevice;
+let userId: string;
 
 function validInput(overrides: Partial<SensorReadingInput> = {}): SensorReadingInput {
   return {
@@ -33,7 +35,11 @@ function validInput(overrides: Partial<SensorReadingInput> = {}): SensorReadingI
 }
 
 beforeEach(async () => {
-  const plant = await prisma.plant.create({ data: { name: 'Reading Service Test Plant' } });
+  ({ userId } = await createTestUserAndToken());
+
+  const plant = await prisma.plant.create({
+    data: { name: 'Reading Service Test Plant', userId },
+  });
   plantId = plant.id;
 
   const created = await prisma.device.create({
@@ -43,6 +49,7 @@ beforeEach(async () => {
       credentialHash: hashDeviceCredential('unused'),
       enabled: true,
       plantId,
+      userId,
     },
   });
 
@@ -116,6 +123,7 @@ describe('ingestReading', () => {
         identifier: `reading-service-test-device-${randomUUID()}`,
         credentialHash: hashDeviceCredential('unused'),
         enabled: true,
+        userId,
       },
     });
     const { credentialHash: _hash, ...unassignedDevice } = unassignedRow;
@@ -168,7 +176,7 @@ describe('ingestReading', () => {
     const input = validInput();
     await ingestReading(input, device);
 
-    const otherPlant = await prisma.plant.create({ data: { name: 'Other Plant' } });
+    const otherPlant = await prisma.plant.create({ data: { name: 'Other Plant', userId } });
     const otherRow = await prisma.device.create({
       data: {
         name: 'Other Device',
@@ -176,6 +184,7 @@ describe('ingestReading', () => {
         credentialHash: hashDeviceCredential('unused'),
         enabled: true,
         plantId: otherPlant.id,
+        userId,
       },
     });
     const { credentialHash: _hash, ...otherDevice } = otherRow;

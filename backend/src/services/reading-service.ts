@@ -104,8 +104,11 @@ export async function ingestReading(
   }
 }
 
-export async function getLatestReadingForPlant(plantId: string): Promise<SensorReading | null> {
-  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+export async function getLatestReadingForPlant(
+  plantId: string,
+  userId: string,
+): Promise<SensorReading | null> {
+  const plant = await prisma.plant.findFirst({ where: { id: plantId, userId } });
   if (!plant) {
     throw new NotFoundError('Plant not found');
   }
@@ -128,9 +131,10 @@ export type ListReadingsOptions = {
 
 export async function listReadingsForPlant(
   plantId: string,
+  userId: string,
   options: ListReadingsOptions,
 ): Promise<SensorReading[]> {
-  const plant = await prisma.plant.findUnique({ where: { id: plantId } });
+  const plant = await prisma.plant.findFirst({ where: { id: plantId, userId } });
   if (!plant) {
     throw new NotFoundError('Plant not found');
   }
@@ -163,12 +167,13 @@ export type RecentReading = Prisma.SensorReadingGetPayload<{
   include: typeof recentReadingInclude;
 }>;
 
-export async function listRecentReadings(limit: number): Promise<RecentReading[]> {
+export async function listRecentReadings(limit: number, userId: string): Promise<RecentReading[]> {
   // Ordered by receivedAt (when the pipeline actually processed it), not
   // recordedAt — this view is "what has the pipeline been doing lately,"
   // not "what is the true measurement history" (that's the plant-history
   // endpoint's job, which orders by recordedAt on purpose).
   return prisma.sensorReading.findMany({
+    where: { plant: { userId } },
     orderBy: { receivedAt: 'desc' },
     take: limit,
     include: recentReadingInclude,

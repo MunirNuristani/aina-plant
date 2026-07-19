@@ -51,6 +51,14 @@ export class ForbiddenError extends AppError {
   }
 }
 
+export class TooManyRequestsError extends AppError {
+  readonly code = 'TOO_MANY_REQUESTS';
+
+  constructor(message: string) {
+    super(message, 429);
+  }
+}
+
 export type FieldError = { field: string; message: string };
 
 /**

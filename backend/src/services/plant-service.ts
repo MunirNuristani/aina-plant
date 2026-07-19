@@ -6,8 +6,8 @@ import type { CreatePlantInput } from '../validation/plant';
 // Plant names aren't unique (see prisma/schema.prisma -- no @unique on
 // name, unlike Device.identifier), so unlike registerDevice() there's no
 // duplicate case to handle here: every valid submission creates a new row.
-export function createPlant(input: CreatePlantInput): Promise<Plant> {
-  return prisma.plant.create({ data: input });
+export function createPlant(input: CreatePlantInput, userId: string): Promise<Plant> {
+  return prisma.plant.create({ data: { ...input, userId } });
 }
 
 // Device.plantId has no unique constraint (see prisma/schema.prisma), so a
@@ -36,16 +36,17 @@ export type PlantWithActiveDevices = Prisma.PlantGetPayload<{
   include: typeof plantWithActiveDevicesInclude;
 }>;
 
-export function listPlants(): Promise<PlantWithActiveDevices[]> {
+export function listPlants(userId: string): Promise<PlantWithActiveDevices[]> {
   return prisma.plant.findMany({
+    where: { userId },
     include: plantWithActiveDevicesInclude,
     orderBy: { createdAt: 'asc' },
   });
 }
 
-export async function getPlantById(plantId: string): Promise<PlantWithActiveDevices> {
-  const plant = await prisma.plant.findUnique({
-    where: { id: plantId },
+export async function getPlantById(plantId: string, userId: string): Promise<PlantWithActiveDevices> {
+  const plant = await prisma.plant.findFirst({
+    where: { id: plantId, userId },
     include: plantWithActiveDevicesInclude,
   });
 

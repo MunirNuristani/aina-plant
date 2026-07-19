@@ -6,6 +6,7 @@ import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
 import { logger } from '../lib/logger';
 import { ingestReading } from '../services/reading-service';
+import { createTestUserAndToken } from '../test-helpers/auth';
 import type { SensorReadingInput } from '../validation/reading';
 
 const app = createApp();
@@ -14,6 +15,15 @@ const SECRET = 'reading-test-secret';
 let plantId: string;
 let deviceId: string;
 let deviceIdentifier: string;
+let userId: string;
+let token: string;
+
+// GET /recent requires an authenticated human user (unlike POST /, which is
+// device-authenticated via authed() below) -- this is a thin wrapper so
+// every call site doesn't need to repeat the header.
+function recent() {
+  return request(app).get('/api/v1/readings/recent').set('Authorization', `Bearer ${token}`);
+}
 
 function validPayload(overrides: Record<string, unknown> = {}) {
   return {
@@ -36,7 +46,9 @@ function authed() {
 }
 
 beforeEach(async () => {
-  const plant = await prisma.plant.create({ data: { name: 'Reading Test Plant' } });
+  ({ userId, token } = await createTestUserAndToken());
+
+  const plant = await prisma.plant.create({ data: { name: 'Reading Test Plant', userId } });
   plantId = plant.id;
 
   deviceIdentifier = `test-reading-device-${randomUUID()}`;
@@ -47,6 +59,7 @@ beforeEach(async () => {
       credentialHash: hashDeviceCredential(SECRET),
       enabled: true,
       plantId,
+      userId,
     },
   });
   deviceId = device.id;
@@ -189,6 +202,7 @@ describe('POST /api/v1/readings', () => {
         identifier: unassignedIdentifier,
         credentialHash: hashDeviceCredential(SECRET),
         enabled: true,
+        userId,
       },
     });
 
@@ -216,6 +230,7 @@ describe('POST /api/v1/readings', () => {
         credentialHash: hashDeviceCredential(SECRET),
         enabled: true,
         plantId,
+        userId,
       },
     });
 
@@ -364,7 +379,7 @@ describe('GET /api/v1/readings/recent', () => {
       },
     });
 
-    const res = await request(app).get('/api/v1/readings/recent');
+    const res = await recent();
     expect(res.status).toBe(200);
 
     const found = res.body.readings.find((r: { id: string }) => r.id === reading.id);
@@ -403,7 +418,7 @@ describe('GET /api/v1/readings/recent', () => {
       },
     });
 
-    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 500 });
+    const res = await recent().query({ limit: 500 });
     const ids = res.body.readings.map((r: { id: string }) => r.id);
 
     expect(ids.indexOf(newerReceived.id)).toBeLessThan(ids.indexOf(olderReceived.id));
@@ -424,18 +439,18 @@ describe('GET /api/v1/readings/recent', () => {
       });
     }
 
-    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 2 });
+    const res = await recent().query({ limit: 2 });
     expect(res.status).toBe(200);
     expect(res.body.readings).toHaveLength(2);
   });
 
   it('rejects a limit above the documented maximum', async () => {
-    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 501 });
+    const res = await recent().query({ limit: 501 });
     expect(res.status).toBe(400);
   });
 
   it('rejects a limit of zero', async () => {
-    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 0 });
+    const res = await recent().query({ limit: 0 });
     expect(res.status).toBe(400);
   });
 
@@ -443,7 +458,7 @@ describe('GET /api/v1/readings/recent', () => {
     const rejected = await authed().send(validPayload({ moisturePercent: 999 }));
     expect(rejected.status).toBe(400);
 
-    const res = await request(app).get('/api/v1/readings/recent').query({ limit: 500 });
+    const res = await recent().query({ limit: 500 });
     const matches = res.body.readings.filter((r: { deviceId: string }) => r.deviceId === deviceId);
     expect(matches).toHaveLength(0);
   });

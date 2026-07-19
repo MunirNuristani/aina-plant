@@ -5,8 +5,16 @@ import { createApp } from '../app';
 import { prisma } from '../db';
 import { hashDeviceCredential } from '../lib/device-credential';
 import { logger } from '../lib/logger';
+import { createTestUserAndToken } from '../test-helpers/auth';
 
 const app = createApp();
+
+let userId: string;
+let token: string;
+
+beforeEach(async () => {
+  ({ userId, token } = await createTestUserAndToken());
+});
 
 function validPayload(overrides: Record<string, unknown> = {}) {
   return {
@@ -36,7 +44,7 @@ afterAll(async () => {
 describe('POST /api/v1/devices', () => {
   it('registers a unique device and returns 201', async () => {
     const payload = validPayload();
-    const res = await request(app).post('/api/v1/devices').send(payload);
+    const res = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload);
 
     expect(res.status).toBe(201);
     expect(res.body.device.name).toBe(payload.name);
@@ -50,18 +58,18 @@ describe('POST /api/v1/devices', () => {
   });
 
   it('is enabled by default', async () => {
-    const res = await request(app).post('/api/v1/devices').send(validPayload());
+    const res = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(validPayload());
     expect(res.body.device.enabled).toBe(true);
   });
 
   it('stores the default reporting interval when none is provided', async () => {
-    const res = await request(app).post('/api/v1/devices').send(validPayload());
+    const res = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(validPayload());
     expect(res.body.device.reportingIntervalSeconds).toBe(900);
   });
 
   it('stores a provided reporting interval instead of the default', async () => {
     const res = await request(app)
-      .post('/api/v1/devices')
+      .post('/api/v1/devices').set('Authorization', `Bearer ${token}`)
       .send(validPayload({ reportingIntervalSeconds: 300 }));
 
     expect(res.status).toBe(201);
@@ -70,13 +78,13 @@ describe('POST /api/v1/devices', () => {
 
   it('stores an optional firmwareVersion when provided', async () => {
     const res = await request(app)
-      .post('/api/v1/devices')
+      .post('/api/v1/devices').set('Authorization', `Bearer ${token}`)
       .send(validPayload({ firmwareVersion: '1.2.3' }));
     expect(res.body.device.firmwareVersion).toBe('1.2.3');
   });
 
   it('returns a device key once, alongside the device, and never as part of the device object', async () => {
-    const res = await request(app).post('/api/v1/devices').send(validPayload());
+    const res = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(validPayload());
 
     expect(res.status).toBe(201);
     expect(typeof res.body.credential).toBe('string');
@@ -90,7 +98,7 @@ describe('POST /api/v1/devices', () => {
 
   it('issues a credential that actually authenticates the newly registered device', async () => {
     const payload = validPayload();
-    const registerRes = await request(app).post('/api/v1/devices').send(payload);
+    const registerRes = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload);
     expect(registerRes.status).toBe(201);
 
     const authRes = await request(app)
@@ -103,11 +111,11 @@ describe('POST /api/v1/devices', () => {
 
   it('rejects a duplicate identifier with 409', async () => {
     const payload = validPayload();
-    const first = await request(app).post('/api/v1/devices').send(payload);
+    const first = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload);
     expect(first.status).toBe(201);
 
     const second = await request(app)
-      .post('/api/v1/devices')
+      .post('/api/v1/devices').set('Authorization', `Bearer ${token}`)
       .send(validPayload({ identifier: payload.identifier }));
     expect(second.status).toBe(409);
 
@@ -119,8 +127,8 @@ describe('POST /api/v1/devices', () => {
     const payload = validPayload();
 
     const [first, second] = await Promise.all([
-      request(app).post('/api/v1/devices').send(payload),
-      request(app).post('/api/v1/devices').send(payload),
+      request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload),
+      request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload),
     ]);
 
     const statuses = [first.status, second.status].sort();
@@ -134,7 +142,7 @@ describe('POST /api/v1/devices', () => {
     const payload = validPayload();
     delete (payload as Record<string, unknown>).name;
 
-    const res = await request(app).post('/api/v1/devices').send(payload);
+    const res = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload);
 
     expect(res.status).toBe(400);
     expect(res.body.error.details).toEqual(
@@ -146,7 +154,7 @@ describe('POST /api/v1/devices', () => {
     const payload = validPayload();
     delete (payload as Record<string, unknown>).identifier;
 
-    const res = await request(app).post('/api/v1/devices').send(payload);
+    const res = await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload);
 
     expect(res.status).toBe(400);
     expect(res.body.error.details).toEqual(
@@ -156,35 +164,35 @@ describe('POST /api/v1/devices', () => {
 
   it('rejects an empty name', async () => {
     const res = await request(app)
-      .post('/api/v1/devices')
+      .post('/api/v1/devices').set('Authorization', `Bearer ${token}`)
       .send(validPayload({ name: '' }));
     expect(res.status).toBe(400);
   });
 
   it('rejects a name over 100 characters', async () => {
     const res = await request(app)
-      .post('/api/v1/devices')
+      .post('/api/v1/devices').set('Authorization', `Bearer ${token}`)
       .send(validPayload({ name: 'x'.repeat(101) }));
     expect(res.status).toBe(400);
   });
 
   it('rejects a non-positive reporting interval', async () => {
     const res = await request(app)
-      .post('/api/v1/devices')
+      .post('/api/v1/devices').set('Authorization', `Bearer ${token}`)
       .send(validPayload({ reportingIntervalSeconds: 0 }));
     expect(res.status).toBe(400);
   });
 
   it('rejects a non-integer reporting interval', async () => {
     const res = await request(app)
-      .post('/api/v1/devices')
+      .post('/api/v1/devices').set('Authorization', `Bearer ${token}`)
       .send(validPayload({ reportingIntervalSeconds: 12.5 }));
     expect(res.status).toBe(400);
   });
 
   it('does not create a device when validation fails', async () => {
     const payload = validPayload({ name: '' });
-    await request(app).post('/api/v1/devices').send(payload);
+    await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(payload);
 
     const stored = await prisma.device.findUnique({ where: { identifier: payload.identifier } });
     expect(stored).toBeNull();
@@ -204,6 +212,7 @@ describe('POST /api/v1/devices/:id/rotate-credential', () => {
         identifier,
         credentialHash: hashDeviceCredential(ORIGINAL_SECRET),
         enabled: true,
+        userId,
       },
     });
     deviceId = device.id;
@@ -214,7 +223,7 @@ describe('POST /api/v1/devices/:id/rotate-credential', () => {
   });
 
   it('returns a new credential once, distinct from the original', async () => {
-    const res = await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).send();
+    const res = await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).set('Authorization', `Bearer ${token}`).send();
 
     expect(res.status).toBe(200);
     expect(typeof res.body.credential).toBe('string');
@@ -223,28 +232,28 @@ describe('POST /api/v1/devices/:id/rotate-credential', () => {
   });
 
   it('leaves the device id, identifier, and other fields unchanged', async () => {
-    const res = await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).send();
+    const res = await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).set('Authorization', `Bearer ${token}`).send();
 
     expect(res.body.device.id).toBe(deviceId);
     expect(res.body.device.identifier).toBe(identifier);
   });
 
   it('never returns credentialHash', async () => {
-    const res = await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).send();
+    const res = await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).set('Authorization', `Bearer ${token}`).send();
     expect(res.body.device.credentialHash).toBeUndefined();
     expect(res.body.device.credential).toBeUndefined();
   });
 
   it('actually changes the stored hash', async () => {
     const before = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
-    await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).send();
+    await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).set('Authorization', `Bearer ${token}`).send();
     const after = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
 
     expect(after.credentialHash).not.toBe(before.credentialHash);
   });
 
   it('makes the old credential stop authenticating', async () => {
-    await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).send();
+    await request(app).post(`/api/v1/devices/${deviceId}/rotate-credential`).set('Authorization', `Bearer ${token}`).send();
 
     const authRes = await request(app)
       .post('/api/v1/devices/auth')
@@ -255,7 +264,7 @@ describe('POST /api/v1/devices/:id/rotate-credential', () => {
 
   it('makes the new credential authenticate successfully', async () => {
     const rotateRes = await request(app)
-      .post(`/api/v1/devices/${deviceId}/rotate-credential`)
+      .post(`/api/v1/devices/${deviceId}/rotate-credential`).set('Authorization', `Bearer ${token}`)
       .send();
 
     const authRes = await request(app)
@@ -267,7 +276,7 @@ describe('POST /api/v1/devices/:id/rotate-credential', () => {
   });
 
   it('returns 404 for a nonexistent device', async () => {
-    const res = await request(app).post(`/api/v1/devices/${randomUUID()}/rotate-credential`).send();
+    const res = await request(app).post(`/api/v1/devices/${randomUUID()}/rotate-credential`).set('Authorization', `Bearer ${token}`).send();
     expect(res.status).toBe(404);
   });
 
@@ -277,7 +286,7 @@ describe('POST /api/v1/devices/:id/rotate-credential', () => {
     const errorSpy = vi.spyOn(logger, 'error');
 
     const rotateRes = await request(app)
-      .post(`/api/v1/devices/${deviceId}/rotate-credential`)
+      .post(`/api/v1/devices/${deviceId}/rotate-credential`).set('Authorization', `Bearer ${token}`)
       .send();
     const newSecret = rotateRes.body.credential;
 

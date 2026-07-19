@@ -1,15 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { prisma } from './index';
+import { createTestUserAndToken } from '../test-helpers/auth';
 
 let deviceId: string;
 
 beforeEach(async () => {
+  const { userId } = await createTestUserAndToken();
   const device = await prisma.device.create({
     data: {
       name: 'Calibration Test Device',
       identifier: `test-calibration-device-${randomUUID()}`,
       credentialHash: 'unused',
+      userId,
     },
   });
   deviceId = device.id;
