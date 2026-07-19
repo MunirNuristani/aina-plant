@@ -33,3 +33,24 @@ export type SensorReading = {
   firmwareVersion: string | null;
   wifiRssi: number | null;
 };
+
+export type CareEvent = {
+  id: string;
+  type: "WATERING";
+  plantId: string;
+  occurredAt: string;
+  createdAt: string;
+  amount: number | null;
+  unit: string | null;
+  notes: string | null;
+  deletedAt: string | null;
+};
+
+export type ApiErrorDetail = { field: string; message: string };
+
+export type ApiError = {
+  code: "VALIDATION_ERROR" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "INTERNAL_ERROR";
+  message: string;
+  requestId?: string;
+  details?: ApiErrorDetail[] | Record<string, unknown>;
+};
