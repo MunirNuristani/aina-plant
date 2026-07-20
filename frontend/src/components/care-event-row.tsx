@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { deleteCareEventAction, updateCareEventAction } from "@/lib/actions/care-events";
 import { formatDateTime, toLocalDateTimeInputValue } from "@/lib/format";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import type { CareEvent } from "@/lib/types";
 
 type Mode = "view" | "edit" | "confirm-delete";
@@ -106,49 +108,38 @@ export function CareEventRow({ plantId, event }: { plantId: string; event: CareE
       <form
         onSubmit={handleSave}
         noValidate
-        className="flex flex-col gap-3 border-b border-line py-4 last:border-0"
+        className="flex flex-col gap-3 border-b border-border-default py-4 last:border-0"
       >
-        <div className="flex flex-col gap-1">
-          <label htmlFor={`occurredAt-${event.id}`} className="text-sm text-ink">
-            When
-          </label>
-          <input
-            id={`occurredAt-${event.id}`}
-            type="datetime-local"
-            value={occurredAt}
-            onChange={(e) => setOccurredAt(e.target.value)}
-            className="rounded-md border border-line bg-background px-3 py-2 text-sm text-ink"
-          />
-          {fieldErrors.occurredAt ? <p className="text-sm text-error">{fieldErrors.occurredAt}</p> : null}
-        </div>
+        <Input
+          id={`occurredAt-${event.id}`}
+          label="When"
+          type="datetime-local"
+          value={occurredAt}
+          onChange={(e) => setOccurredAt(e.target.value)}
+          error={fieldErrors.occurredAt}
+        />
 
         <div className="flex gap-3">
-          <div className="flex flex-1 flex-col gap-1">
-            <label htmlFor={`amount-${event.id}`} className="text-sm text-ink">
-              Amount
-            </label>
-            <input
+          <div className="flex-1">
+            <Input
               id={`amount-${event.id}`}
+              label="Amount"
               type="number"
               min="0"
               step="any"
               inputMode="decimal"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="rounded-md border border-line bg-background px-3 py-2 text-sm text-ink"
+              error={fieldErrors.amount}
             />
-            {fieldErrors.amount ? <p className="text-sm text-error">{fieldErrors.amount}</p> : null}
           </div>
-          <div className="flex w-24 flex-col gap-1">
-            <label htmlFor={`unit-${event.id}`} className="text-sm text-ink">
-              Unit
-            </label>
-            <input
+          <div className="w-24">
+            <Input
               id={`unit-${event.id}`}
+              label="Unit"
               type="text"
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
-              className="rounded-md border border-line bg-background px-3 py-2 text-sm text-ink"
             />
           </div>
         </div>
@@ -157,41 +148,36 @@ export function CareEventRow({ plantId, event }: { plantId: string; event: CareE
             API has no way to clear an already-set amount/unit, only change
             it, so the honest thing is to say so rather than let a blanked
             field silently fail to clear. */}
-        <p className="text-xs text-ink-muted">
+        <p className="text-text-muted [font:var(--text-body-s)]">
           Leave amount or unit blank to keep their current value — neither can be cleared once set, only changed.
         </p>
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor={`notes-${event.id}`} className="text-sm text-ink">
+        <label htmlFor={`notes-${event.id}`} className="flex flex-col gap-1.5 [font:var(--text-body-s)]">
+          <span className="text-text-secondary tracking-[var(--tracking-label)] [font:var(--text-label)]">
             Notes
-          </label>
+          </span>
           <textarea
             id={`notes-${event.id}`}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            className="resize-none rounded-md border border-line bg-background px-3 py-2 text-sm text-ink"
+            className="resize-none rounded-s border border-border-strong bg-surface-card px-3 py-2.5 text-text-primary outline-none [font:var(--text-body-m)]"
           />
-        </div>
+        </label>
 
-        {formError ? <p className="rounded-md bg-error/10 px-3 py-2 text-sm text-ink">{formError}</p> : null}
+        {formError ? (
+          <p className="rounded-s bg-status-critical-bg px-3 py-2 text-status-critical-fg [font:var(--text-body-s)]">
+            {formError}
+          </p>
+        ) : null}
 
         <div className="flex gap-2">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-md bg-primary px-4 py-2 font-mono text-xs uppercase tracking-widest text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-          >
+          <Button type="submit" variant="primary" size="s" disabled={submitting}>
             {submitting ? "Saving…" : "Save"}
-          </button>
-          <button
-            type="button"
-            onClick={cancelEdit}
-            disabled={submitting}
-            className="rounded-md border border-line px-4 py-2 font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-ink"
-          >
+          </Button>
+          <Button type="button" variant="ghost" size="s" onClick={cancelEdit} disabled={submitting}>
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     );
@@ -199,52 +185,49 @@ export function CareEventRow({ plantId, event }: { plantId: string; event: CareE
 
   return (
     <div
-      className={`flex items-start justify-between gap-4 border-b border-line py-4 last:border-0 ${deleting ? "opacity-50" : ""}`}
+      className={`flex items-start justify-between gap-4 border-b border-border-default py-4 last:border-0 ${deleting ? "opacity-50" : ""}`}
     >
       <div className="flex flex-col gap-1">
-        <p className="text-sm text-ink">{formatDateTime(event.occurredAt)}</p>
+        <p className="text-text-primary [font:var(--text-body-m)]">{formatDateTime(event.occurredAt)}</p>
         {event.amount !== null ? (
-          <p className="font-mono text-sm text-ink-muted">
+          <p className="text-text-muted [font:var(--text-mono-s)]">
             {event.amount}
             {event.unit ? ` ${event.unit}` : ""}
           </p>
         ) : null}
-        {event.notes ? <p className="text-sm text-ink-muted">{event.notes}</p> : null}
-        {formError ? <p className="text-sm text-error">{formError}</p> : null}
+        {event.notes ? <p className="text-text-muted [font:var(--text-body-s)]">{event.notes}</p> : null}
+        {formError ? <p className="text-critical [font:var(--text-body-s)]">{formError}</p> : null}
       </div>
 
       {mode === "confirm-delete" ? (
         <div className="flex shrink-0 gap-2">
-          <button
+          <Button
             type="button"
+            variant="primary"
+            size="s"
             onClick={handleDelete}
             disabled={deleting}
-            className="rounded-md bg-error px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="!bg-critical hover:!bg-[#8f2e24]"
           >
             {deleting ? "Deleting…" : "Confirm delete"}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("view")}
-            disabled={deleting}
-            className="rounded-md border border-line px-3 py-1.5 font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-ink"
-          >
+          </Button>
+          <Button type="button" variant="ghost" size="s" onClick={() => setMode("view")} disabled={deleting}>
             Cancel
-          </button>
+          </Button>
         </div>
       ) : (
-        <div className="flex shrink-0 gap-2">
+        <div className="flex shrink-0 gap-3">
           <button
             type="button"
             onClick={startEdit}
-            className="font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-primary"
+            className="uppercase tracking-[var(--tracking-label)] text-text-muted transition-colors hover:text-action-primary [font:var(--text-label)]"
           >
             Edit
           </button>
           <button
             type="button"
             onClick={() => setMode("confirm-delete")}
-            className="font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-error"
+            className="uppercase tracking-[var(--tracking-label)] text-text-muted transition-colors hover:text-critical [font:var(--text-label)]"
           >
             Delete
           </button>

@@ -22,7 +22,7 @@ type RangeBounds = Record<Range, { start: string; end: string }>;
 const RANGES: Range[] = ["24h", "7d"];
 const RANGE_LABEL: Record<Range, string> = { "24h": "24 hours", "7d": "7 days" };
 
-const AXIS_TICK = { fill: "var(--color-ink-muted)", fontSize: 11, fontFamily: "var(--font-mono)" };
+const AXIS_TICK = { fill: "var(--text-muted)", fontSize: 11, fontFamily: "var(--font-mono)" };
 
 export function MoistureHistoryChart({
   readingsByRange,
@@ -73,18 +73,20 @@ export function MoistureHistoryChart({
   );
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6">
+    <div className="flex flex-col gap-4 rounded-m border border-border-default bg-surface-card p-6 shadow-card">
       <div className="flex items-center justify-between">
-        <p className="font-mono text-xs uppercase tracking-widest text-ink-muted">Moisture history</p>
-        <div className="flex gap-1 rounded-md border border-line p-0.5">
+        <p className="uppercase tracking-[var(--tracking-label)] text-text-muted [font:var(--text-label)]">
+          Moisture history
+        </p>
+        <div className="flex gap-1 rounded-s border border-border-default p-0.5">
           {RANGES.map((r) => (
             <button
               key={r}
               type="button"
               onClick={() => setRange(r)}
               aria-pressed={range === r}
-              className={`rounded px-2.5 py-1 font-mono text-xs uppercase tracking-widest transition-colors ${
-                range === r ? "bg-primary text-white" : "text-ink-muted hover:text-ink"
+              className={`rounded-s px-2.5 py-1 uppercase tracking-[var(--tracking-label)] transition-colors [font:var(--text-label)] ${
+                range === r ? "bg-action-primary text-text-on-primary" : "text-text-muted hover:text-text-primary"
               }`}
             >
               {r}
@@ -94,9 +96,9 @@ export function MoistureHistoryChart({
       </div>
 
       {readings.length === 0 ? (
-        <div className="flex flex-col items-center gap-1 rounded-lg border border-dashed border-line px-6 py-12 text-center">
-          <p className="text-ink">No data in this range</p>
-          <p className="max-w-xs text-sm text-ink-muted">
+        <div className="flex flex-col items-center gap-1 rounded-m border border-dashed border-border-strong px-6 py-12 text-center">
+          <p className="text-text-primary [font:var(--text-body-m)]">No data in this range</p>
+          <p className="max-w-xs text-text-muted [font:var(--text-body-s)]">
             No readings were recorded in the last {RANGE_LABEL[range]}.
           </p>
         </div>
@@ -111,7 +113,7 @@ export function MoistureHistoryChart({
           >
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={series} margin={{ top: 8, right: 28, left: 0, bottom: 0 }}>
-                <CartesianGrid vertical={false} stroke="var(--color-line)" />
+                <CartesianGrid vertical={false} stroke="var(--border-default)" />
                 <XAxis
                   dataKey="time"
                   type="number"
@@ -121,7 +123,7 @@ export function MoistureHistoryChart({
                   tickFormatter={(t: number) => formatAxisTime(t, range)}
                   ticks={ticks}
                   tick={AXIS_TICK}
-                  stroke="var(--color-line)"
+                  stroke="var(--border-default)"
                   tickLine={false}
                   axisLine={false}
                 />
@@ -129,27 +131,27 @@ export function MoistureHistoryChart({
                   domain={[0, 100]}
                   tickFormatter={(v: number) => `${v}%`}
                   tick={AXIS_TICK}
-                  stroke="var(--color-line)"
+                  stroke="var(--border-default)"
                   tickLine={false}
                   axisLine={false}
                   width={36}
                 />
                 <Tooltip
                   content={<ChartTooltip />}
-                  cursor={{ stroke: "var(--color-primary)", strokeWidth: 1 }}
+                  cursor={{ stroke: "var(--action-primary)", strokeWidth: 1 }}
                   isAnimationActive={false}
                 />
                 <Area
                   dataKey="moisturePercent"
                   stroke="none"
-                  fill="var(--color-primary)"
+                  fill="var(--action-primary)"
                   fillOpacity={0.1}
                   connectNulls={false}
                   isAnimationActive={false}
                 />
                 <Line
                   dataKey="moisturePercent"
-                  stroke="var(--color-primary)"
+                  stroke="var(--action-primary)"
                   strokeWidth={2}
                   dot={false}
                   // Signal Lime fails mark contrast against the card surface
@@ -158,7 +160,7 @@ export function MoistureHistoryChart({
                   // primary-color ring keeps the dot clearly visible while
                   // still using accent for the fill, per the AINA usage
                   // guide's "sparingly for ... chart points."
-                  activeDot={{ r: 4, fill: "var(--color-accent)", stroke: "var(--color-primary)", strokeWidth: 2 }}
+                  activeDot={{ r: 4, fill: "var(--action-accent)", stroke: "var(--action-primary)", strokeWidth: 2 }}
                   connectNulls={false}
                   isAnimationActive={false}
                 />
@@ -174,7 +176,7 @@ export function MoistureHistoryChart({
                   <ReferenceLine
                     key={event.id}
                     x={new Date(event.occurredAt).getTime()}
-                    stroke="var(--color-accent-warm)"
+                    stroke="var(--color-terracotta)"
                     strokeWidth={1.5}
                     strokeDasharray="4 3"
                     label={{ value: "\u{1F4A7}", position: "top", fontSize: 12 }}
@@ -192,21 +194,24 @@ export function MoistureHistoryChart({
               means here, not inside the chart canvas. */}
           {visibleEvents.length > 0 ? (
             <div className="flex flex-col gap-2">
-              <p className="font-mono text-xs uppercase tracking-widest text-ink-muted">
+              <p className="uppercase tracking-[var(--tracking-label)] text-text-muted [font:var(--text-label)]">
                 Watering events in this range
               </p>
               <ul className="flex flex-col gap-1.5">
                 {visibleEvents.map((event) => (
-                  <li key={event.id} className="flex flex-wrap items-baseline gap-x-2 text-sm">
-                    <span className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-accent-warm" aria-hidden="true" />
-                    <span className="text-ink">{formatDateTime(event.occurredAt)}</span>
+                  <li key={event.id} className="flex flex-wrap items-baseline gap-x-2 [font:var(--text-body-s)]">
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 self-center rounded-full bg-[var(--color-terracotta)]"
+                      aria-hidden="true"
+                    />
+                    <span className="text-text-primary">{formatDateTime(event.occurredAt)}</span>
                     {event.amount !== null ? (
-                      <span className="font-mono text-ink-muted">
+                      <span className="text-text-muted [font:var(--text-mono-s)]">
                         {event.amount}
                         {event.unit ? ` ${event.unit}` : ""}
                       </span>
                     ) : null}
-                    {event.notes ? <span className="text-ink-muted">&mdash; {event.notes}</span> : null}
+                    {event.notes ? <span className="text-text-muted">&mdash; {event.notes}</span> : null}
                   </li>
                 ))}
               </ul>
@@ -233,9 +238,11 @@ function ChartTooltip({
   }
 
   return (
-    <div className="rounded-md border border-line bg-surface px-3 py-2 shadow-sm">
-      <p className="font-display text-lg text-ink">{point.moisturePercent.toFixed(0)}%</p>
-      <p className="font-mono text-xs text-ink-muted">{formatDateTime(new Date(point.time).toISOString())}</p>
+    <div className="rounded-s border border-border-default bg-surface-card px-3 py-2 shadow-raised">
+      <p className="text-text-primary [font:var(--text-heading-s)]">{point.moisturePercent.toFixed(0)}%</p>
+      <p className="text-text-muted [font:var(--text-mono-s)]">
+        {formatDateTime(new Date(point.time).toISOString())}
+      </p>
     </div>
   );
 }
@@ -245,13 +252,13 @@ function ChartTooltip({
 function MoistureHistoryTable({ readings }: { readings: SensorReading[] }) {
   return (
     <details className="group">
-      <summary className="cursor-pointer font-mono text-xs uppercase tracking-widest text-ink-muted group-open:text-ink">
+      <summary className="cursor-pointer uppercase tracking-[var(--tracking-label)] text-text-muted group-open:text-text-primary [font:var(--text-label)]">
         View as table
       </summary>
-      <div className="mt-3 max-h-64 overflow-y-auto rounded-md border border-line">
-        <table className="w-full font-mono text-xs">
-          <thead className="sticky top-0 bg-surface">
-            <tr className="border-b border-line text-left text-ink-muted">
+      <div className="mt-3 max-h-64 overflow-y-auto rounded-s border border-border-default">
+        <table className="w-full [font:var(--text-mono-s)]">
+          <thead className="sticky top-0 bg-surface-card">
+            <tr className="border-b border-border-default text-left text-text-muted">
               <th scope="col" className="px-3 py-2 font-normal">
                 Recorded at
               </th>
@@ -262,9 +269,11 @@ function MoistureHistoryTable({ readings }: { readings: SensorReading[] }) {
           </thead>
           <tbody>
             {[...readings].reverse().map((reading) => (
-              <tr key={reading.id} className="border-b border-line last:border-0">
-                <td className="px-3 py-1.5 text-ink">{formatDateTime(reading.recordedAt)}</td>
-                <td className="px-3 py-1.5 tabular-nums text-ink">{reading.moisturePercent.toFixed(1)}%</td>
+              <tr key={reading.id} className="border-b border-border-default last:border-0">
+                <td className="px-3 py-1.5 text-text-primary">{formatDateTime(reading.recordedAt)}</td>
+                <td className="px-3 py-1.5 tabular-nums text-text-primary">
+                  {reading.moisturePercent.toFixed(1)}%
+                </td>
               </tr>
             ))}
           </tbody>

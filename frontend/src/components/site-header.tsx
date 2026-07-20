@@ -7,26 +7,26 @@ export async function SiteHeader() {
   const email = await getSessionEmail();
 
   return (
-    <header className="border-b border-line bg-surface">
+    <header className="border-b border-border-default bg-surface-card">
       <div className="mx-auto flex max-w-3xl items-center justify-between px-6 py-5">
-        <Link href="/" className="flex items-center gap-2.5 text-primary">
+        <Link href="/" className="flex items-center gap-2.5 text-action-primary">
           <LeafMark className="h-6 w-6" />
-          <span className="font-display text-xl tracking-tight">aina</span>
+          <span className="font-semibold tracking-tight [font:var(--text-heading-l)]">aina</span>
         </Link>
         <div className="flex items-center gap-5">
           <Link
             href="/plants"
-            className="font-mono text-xs uppercase tracking-widest text-ink-muted transition-colors hover:text-primary"
+            className="uppercase tracking-[var(--tracking-label)] text-text-muted transition-colors hover:text-action-primary [font:var(--text-label)]"
           >
             plants
           </Link>
           {email ? (
             <div className="flex items-center gap-3">
-              <span className="font-mono text-xs text-ink-muted">{email}</span>
+              <span className="text-text-muted [font:var(--text-mono-s)]">{email}</span>
               <form action={logoutAction}>
                 <button
                   type="submit"
-                  className="font-mono text-xs uppercase tracking-widest text-ink-muted transition-colors hover:text-primary"
+                  className="uppercase tracking-[var(--tracking-label)] text-text-muted transition-colors hover:text-action-primary [font:var(--text-label)]"
                 >
                   log out
                 </button>
@@ -36,13 +36,13 @@ export async function SiteHeader() {
             <div className="flex items-center gap-3">
               <Link
                 href="/login"
-                className="font-mono text-xs uppercase tracking-widest text-ink-muted transition-colors hover:text-primary"
+                className="uppercase tracking-[var(--tracking-label)] text-text-muted transition-colors hover:text-action-primary [font:var(--text-label)]"
               >
                 log in
               </Link>
               <Link
                 href="/signup"
-                className="font-mono text-xs uppercase tracking-widest text-ink-muted transition-colors hover:text-primary"
+                className="uppercase tracking-[var(--tracking-label)] text-text-muted transition-colors hover:text-action-primary [font:var(--text-label)]"
               >
                 sign up
               </Link>

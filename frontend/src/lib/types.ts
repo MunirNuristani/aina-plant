@@ -8,6 +8,15 @@ export type Device = {
   firmwareVersion: string | null;
 };
 
+// The richer shape GET /api/v1/devices returns (used by the Devices tab
+// and device detail screen) -- a superset of Device, since it also lists
+// devices that aren't currently assigned to any plant.
+export type DeviceListItem = Device & {
+  plantId: string | null;
+  plant: { id: string; name: string } | null;
+  createdAt: string;
+};
+
 export type Plant = {
   id: string;
   name: string;

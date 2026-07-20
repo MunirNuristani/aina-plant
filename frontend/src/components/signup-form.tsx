@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
 import { signupAction } from "@/lib/actions/auth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export function SignupForm() {
   const router = useRouter();
@@ -35,7 +37,9 @@ export function SignupForm() {
       });
 
       if (result.ok) {
-        router.push("/plants");
+        // Unlike login, a fresh signup always has zero plants -- send
+        // them through onboarding once instead of straight to /plants.
+        router.push("/welcome");
         router.refresh();
       } else {
         setFieldErrors(result.fieldErrors);
@@ -54,70 +58,56 @@ export function SignupForm() {
     <form
       onSubmit={handleSubmit}
       noValidate
-      className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6"
+      className="flex flex-col gap-4 rounded-l border border-border-default bg-surface-card p-6 shadow-card"
     >
-      <div className="flex flex-col gap-1">
-        <label htmlFor="name" className="text-sm text-ink">
-          Name <span className="text-ink-muted">(optional)</span>
-        </label>
-        <input
-          id="name"
-          type="text"
-          autoComplete="name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          className="rounded-md border border-line bg-background px-3 py-2 text-sm text-ink"
-        />
-        {fieldErrors.name ? <p className="text-sm text-error">{fieldErrors.name}</p> : null}
-      </div>
+      <Input
+        id="name"
+        label="Name (optional)"
+        type="text"
+        autoComplete="name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        error={fieldErrors.name}
+      />
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="email" className="text-sm text-ink">
-          Email
-        </label>
-        <input
-          id="email"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          className="rounded-md border border-line bg-background px-3 py-2 text-sm text-ink"
-        />
-        {fieldErrors.email ? <p className="text-sm text-error">{fieldErrors.email}</p> : null}
-      </div>
+      <Input
+        id="email"
+        label="Email"
+        type="email"
+        autoComplete="email"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        error={fieldErrors.email}
+      />
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="password" className="text-sm text-ink">
-          Password
-        </label>
-        <input
+      <div className="flex flex-col gap-1.5">
+        <Input
           id="password"
+          label="Password"
           type="password"
           autoComplete="new-password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          className="rounded-md border border-line bg-background px-3 py-2 text-sm text-ink"
+          error={fieldErrors.password}
         />
-        {fieldErrors.password ? (
-          <p className="text-sm text-error">{fieldErrors.password}</p>
-        ) : (
-          <p className="text-sm text-ink-muted">At least 8 characters.</p>
-        )}
+        {!fieldErrors.password ? (
+          <p className="text-text-muted [font:var(--text-body-s)]">At least 8 characters.</p>
+        ) : null}
       </div>
 
-      {formError ? <p className="rounded-md bg-error/10 px-3 py-2 text-sm text-ink">{formError}</p> : null}
+      {formError ? (
+        <p className="rounded-s bg-status-critical-bg px-3 py-2 text-status-critical-fg [font:var(--text-body-s)]">
+          {formError}
+        </p>
+      ) : null}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="self-start rounded-md bg-primary px-4 py-2 font-mono text-xs uppercase tracking-widest text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-      >
+      <Button type="submit" variant="primary" disabled={submitting}>
         {submitting ? "Signing up…" : "Sign up"}
-      </button>
+      </Button>
 
-      <p className="text-sm text-ink-muted">
+      <p className="text-text-muted [font:var(--text-body-s)]">
         Already have an account?{" "}
-        <Link href="/login" className="text-primary hover:opacity-90">
+        <Link href="/login" className="text-text-link hover:text-text-link-hover">
           Log in
         </Link>
       </p>

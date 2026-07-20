@@ -248,6 +248,64 @@ except `POST /api/v1/devices/auth` requires **user authentication** (see
 "Authentication" above) — a device is created under, and only visible
 to, the user that registered it.
 
+### `GET /api/v1/devices`
+
+Lists the authenticated user's own devices, oldest first.
+
+```bash
+curl http://localhost:3000/api/v1/devices \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
+```
+
+#### `200` response
+
+An array, `[]` if there are none. Each device includes a `plant` field —
+`null` if unassigned, otherwise `{ id, name }` for the plant it's
+currently assigned to. Never includes `credentialHash`.
+
+```json
+{
+  "devices": [
+    {
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "name": "Balcony ESP32",
+      "identifier": "esp32-balcony-01",
+      "enabled": true,
+      "reportingIntervalSeconds": 900,
+      "firmwareVersion": null,
+      "lastSeenAt": "2026-01-01T12:00:01.482Z",
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "userId": "0361ffa6-25ef-4285-bfa4-94724c32d1ce",
+      "plantId": "9c858901-8a57-4791-81fe-4c455b099bc9",
+      "plant": { "id": "9c858901-8a57-4791-81fe-4c455b099bc9", "name": "Balcony Fern" }
+    }
+  ]
+}
+```
+
+#### Errors
+
+| Status | Condition                                |
+| ------ | ------------------------------------------ |
+| `401`  | Missing/invalid `Authorization` header.  |
+
+### `GET /api/v1/devices/:id`
+
+A single device, by `id`. Same shape as one entry of the
+`GET /api/v1/devices` array above, wrapped as `{ "device": { ... } }`.
+
+```bash
+curl http://localhost:3000/api/v1/devices/3fa85f64-5717-4562-b3fc-2c963f66afa6 \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...'
+```
+
+#### Errors
+
+| Status | Condition                                                          |
+| ------ | ------------------------------------------------------------------- |
+| `401`  | Missing/invalid `Authorization` header.                             |
+| `404`  | No device with that `id` belonging to the authenticated user.       |
+
 ### `POST /api/v1/devices`
 
 Registers a new device and issues its credential. `FR-DEVICE-001`.
@@ -312,13 +370,28 @@ least one is required.
 
 Any of: `name` (string, 1–100 chars), `firmwareVersion` (string, or
 `null` to clear it), `reportingIntervalSeconds` (positive integer),
-`enabled` (boolean).
+`enabled` (boolean), `plantId` (the literal value `null` only — **unassigns**
+the device from its current plant; see below).
 
 ```bash
 curl -X PATCH http://localhost:3000/api/v1/devices/3fa85f64-5717-4562-b3fc-2c963f66afa6 \
   -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
   -H 'Content-Type: application/json' \
   -d '{"reportingIntervalSeconds": 300, "enabled": false}'
+```
+
+`plantId` is deliberately **unassign-only** here — it accepts `null` and
+nothing else. Assigning a device *to* a specific plant always goes
+through `POST /api/v1/devices/:id/assign` (or the plant-centric
+`POST /api/v1/plants/:plantId/device`) instead, since only those verify
+the target plant belongs to the same user; a non-null `plantId` here is a
+`400`, not silently ignored:
+
+```bash
+curl -X PATCH http://localhost:3000/api/v1/devices/3fa85f64-5717-4562-b3fc-2c963f66afa6 \
+  -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIs...' \
+  -H 'Content-Type: application/json' \
+  -d '{"plantId": null}'
 ```
 
 #### `200` response

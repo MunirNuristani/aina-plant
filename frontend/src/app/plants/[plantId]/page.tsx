@@ -1,13 +1,8 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CareEventList } from "@/components/care-event-list";
-import { DeviceStatusBadge } from "@/components/device-status-badge";
-import { LogWateringForm } from "@/components/log-watering-form";
-import { MoistureHistoryChart } from "@/components/moisture-history-chart";
-import { MoistureStatusCard } from "@/components/moisture-status-card";
-import { TechnicalDetails } from "@/components/technical-details";
-import { TrendSummary } from "@/components/trend-summary";
-import { DEFAULT_REPORTING_INTERVAL_SECONDS } from "@/lib/moisture";
+import { BackHeader } from "@/components/back-header";
+import { PlantDetailTabs } from "@/components/plant-detail-tabs";
+import { StatusPill } from "@/components/ui/status-pill";
+import { DEFAULT_REPORTING_INTERVAL_SECONDS, moistureLevel, MOISTURE_LEVEL_TO_PILL_STATUS } from "@/lib/moisture";
 import {
   getCareEvents,
   getDryingRate,
@@ -19,6 +14,9 @@ import {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+// This page lives outside both the (marketing) and (tabs) route groups --
+// no wordmark header, no bottom tab bar, matching the mockup's
+// isDetailScreen treatment (a back button + title row instead).
 export default async function PlantDashboardPage({
   params,
 }: {
@@ -58,37 +56,27 @@ export default async function PlantDashboardPage({
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-16">
-      <div className="flex flex-col gap-1">
-        <Link
-          href="/plants"
-          className="font-mono text-xs uppercase tracking-widest text-ink-muted hover:text-primary"
-        >
-          &larr; all plants
-        </Link>
-        <h1 className="font-display text-3xl tracking-tight text-ink">{plant.name}</h1>
-        {plant.location ? <p className="text-ink-muted">{plant.location}</p> : null}
-        <div className="mt-1">
-          <DeviceStatusBadge device={plant.devices[0]} />
-        </div>
-      </div>
-
-      <MoistureStatusCard reading={latestReading} reportingIntervalSeconds={reportingIntervalSeconds} />
-
-      <TrendSummary trend={trend} dryingRate={dryingRate} />
-
-      <LogWateringForm plantId={plantId} />
-
-      <CareEventList plantId={plantId} careEvents={careEvents} />
-
-      <MoistureHistoryChart
-        readingsByRange={{ "24h": readings24h, "7d": readings7d }}
-        rangeBounds={rangeBounds}
-        careEvents={careEvents}
-        reportingIntervalSeconds={reportingIntervalSeconds}
+    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 pt-6 pb-4">
+      <BackHeader
+        backHref="/plants"
+        title={plant.name}
+        subtitle={[plant.location, plant.devices[0]?.identifier].filter(Boolean).join(" · ") || undefined}
+        trailing={
+          latestReading ? <StatusPill status={MOISTURE_LEVEL_TO_PILL_STATUS[moistureLevel(latestReading.moisturePercent)]} /> : null
+        }
       />
 
-      {latestReading ? <TechnicalDetails reading={latestReading} /> : null}
+      <PlantDetailTabs
+        plant={plant}
+        plantId={plantId}
+        latestReading={latestReading}
+        reportingIntervalSeconds={reportingIntervalSeconds}
+        trend={trend}
+        dryingRate={dryingRate}
+        careEvents={careEvents}
+        readingsByRange={{ "24h": readings24h, "7d": readings7d }}
+        rangeBounds={rangeBounds}
+      />
     </div>
   );
 }

@@ -25,6 +25,13 @@ export const updateDeviceConfigSchema = z
     firmwareVersion: z.string().trim().min(1).nullable().optional(),
     reportingIntervalSeconds: reportingIntervalSchema.optional(),
     enabled: z.boolean().optional(),
+    // Deliberately z.null() only, not z.string().nullable() -- this lets a
+    // caller *unassign* a device (clear plantId) through this generic
+    // config update, but never *assign* one through it. Assigning to a
+    // specific plant must go through POST /devices/:id/assign instead,
+    // which verifies the target plant belongs to the same user; accepting
+    // an arbitrary non-null plantId here would bypass that check entirely.
+    plantId: z.null().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'At least one field must be provided',

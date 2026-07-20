@@ -1,5 +1,5 @@
 import { prisma } from '../db';
-import type { Device } from '../generated/prisma/client';
+import type { Device, Prisma } from '../generated/prisma/client';
 import { generateDeviceCredential, verifyDeviceCredential } from '../lib/device-credential';
 import { isUniqueConstraintViolation } from '../lib/prisma-errors';
 import { logger } from '../lib/logger';
@@ -13,6 +13,46 @@ export type PublicDevice = Omit<Device, 'credentialHash'>;
 function toPublicDevice(device: Device): PublicDevice {
   const { credentialHash: _credentialHash, ...publicDevice } = device;
   return publicDevice;
+}
+
+// Minimal plant projection -- just enough for the Devices list/detail
+// screens to show "Assigned to X" without a second round trip.
+const deviceWithPlantInclude = {
+  plant: { select: { id: true, name: true } },
+} satisfies Prisma.DeviceInclude;
+
+export type PublicDeviceWithPlant = PublicDevice & {
+  plant: { id: string; name: string } | null;
+};
+
+function toPublicDeviceWithPlant(
+  device: Device & { plant: { id: string; name: string } | null },
+): PublicDeviceWithPlant {
+  const { credentialHash: _credentialHash, ...publicDevice } = device;
+  return publicDevice;
+}
+
+export async function listDevices(userId: string): Promise<PublicDeviceWithPlant[]> {
+  const devices = await prisma.device.findMany({
+    where: { userId },
+    include: deviceWithPlantInclude,
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return devices.map(toPublicDeviceWithPlant);
+}
+
+export async function getDeviceById(deviceId: string, userId: string): Promise<PublicDeviceWithPlant> {
+  const device = await prisma.device.findFirst({
+    where: { id: deviceId, userId },
+    include: deviceWithPlantInclude,
+  });
+
+  if (!device) {
+    throw new NotFoundError('Device not found');
+  }
+
+  return toPublicDeviceWithPlant(device);
 }
 
 export async function registerDevice(

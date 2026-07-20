@@ -11,10 +11,14 @@ export function MoistureStatusCard({
 }) {
   if (!reading) {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-line bg-surface px-6 py-12 text-center">
-        <p className="font-mono text-xs uppercase tracking-widest text-ink-muted">Moisture</p>
-        <p className="text-ink">Unavailable</p>
-        <p className="max-w-xs text-sm text-ink-muted">No reading has come in yet for this plant.</p>
+      <div className="flex flex-col items-center gap-2 rounded-m border border-dashed border-border-strong bg-surface-card px-6 py-12 text-center">
+        <p className="uppercase tracking-[var(--tracking-label)] text-text-muted [font:var(--text-label)]">
+          Soil moisture
+        </p>
+        <p className="text-text-primary [font:var(--text-body-m)]">Unavailable</p>
+        <p className="max-w-xs text-text-muted [font:var(--text-body-s)]">
+          No reading has come in yet for this plant.
+        </p>
       </div>
     );
   }
@@ -24,24 +28,28 @@ export function MoistureStatusCard({
   const stale = isReadingStale(reading, reportingIntervalSeconds);
 
   return (
-    <div className="flex flex-col gap-4 rounded-lg border border-line bg-surface p-6">
-      <div className="flex items-baseline gap-3">
-        <span className="font-display text-5xl tracking-tight text-ink">
-          {reading.moisturePercent.toFixed(0)}%
+    <div className="flex flex-col gap-4 rounded-m border border-border-default bg-surface-card p-6 shadow-card">
+      <div className="flex flex-col gap-2.5">
+        <span className="uppercase tracking-[var(--tracking-label)] text-text-muted [font:var(--text-label)]">
+          Soil moisture
         </span>
-        {/* Text stays a neutral ink token even for a status row — a status
-            color is only ever contrast-safe as a small mark (the dot),
-            never as text (Golden Pollen in particular fails WCAG text
-            contrast outright, ~2:1 against this surface). */}
-        <span className="flex items-center gap-1.5 font-mono text-xs uppercase tracking-widest text-ink">
-          <span className={`h-1.5 w-1.5 rounded-full ${copy.dotClass}`} aria-hidden="true" />
-          {copy.label}
-        </span>
+        <div className="flex items-baseline gap-2">
+          <span className="text-text-primary [font:var(--text-display-m)]">
+            {reading.moisturePercent.toFixed(0)}%
+          </span>
+          {/* Status color lives on the dot only -- text stays a neutral ink
+              token, since Golden Pollen (warning) fails WCAG text contrast
+              outright as text. */}
+          <span className="flex items-center gap-1.5 uppercase tracking-[var(--tracking-label)] text-text-primary [font:var(--text-label)]">
+            <span className={`h-1.5 w-1.5 rounded-full ${copy.dotClass}`} aria-hidden="true" />
+            {copy.label}
+          </span>
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
+      <div className="flex flex-wrap items-center gap-2 text-text-muted [font:var(--text-body-s)]">
         <span>Updated {formatRelativeTime(reading.recordedAt)}</span>
         {stale ? (
-          <span className="rounded-full bg-warning/10 px-2 py-0.5 font-mono text-xs uppercase tracking-widest text-ink">
+          <span className="rounded-pill bg-status-warning-bg px-2 py-0.5 uppercase tracking-[var(--tracking-label)] text-status-warning-fg [font:var(--text-label)]">
             Stale
           </span>
         ) : null}

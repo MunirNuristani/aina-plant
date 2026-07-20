@@ -310,3 +310,167 @@ describe('POST /api/v1/devices/:id/rotate-credential', () => {
     errorSpy.mockRestore();
   });
 });
+
+describe('GET /api/v1/devices', () => {
+  it('returns 401 without a token', async () => {
+    const res = await request(app).get('/api/v1/devices');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns an empty list for a user with no devices', async () => {
+    const res = await request(app).get('/api/v1/devices').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.devices).toEqual([]);
+  });
+
+  it("lists only the authenticated user's own devices, never another user's", async () => {
+    const res = await request(app)
+      .post('/api/v1/devices')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validPayload());
+    expect(res.status).toBe(201);
+
+    const { token: otherToken } = await createTestUserAndToken();
+    const otherRes = await request(app)
+      .post('/api/v1/devices')
+      .set('Authorization', `Bearer ${otherToken}`)
+      .send(validPayload());
+    expect(otherRes.status).toBe(201);
+
+    const list = await request(app).get('/api/v1/devices').set('Authorization', `Bearer ${token}`);
+    expect(list.status).toBe(200);
+    expect(list.body.devices).toHaveLength(1);
+    expect(list.body.devices[0].id).toBe(res.body.device.id);
+
+    await prisma.device.deleteMany({ where: { id: otherRes.body.device.id } });
+  });
+
+  it('never returns credentialHash', async () => {
+    await request(app).post('/api/v1/devices').set('Authorization', `Bearer ${token}`).send(validPayload());
+    const res = await request(app).get('/api/v1/devices').set('Authorization', `Bearer ${token}`);
+    expect(res.body.devices[0].credentialHash).toBeUndefined();
+  });
+
+  it('includes plant: null for an unassigned device, and { id, name } once assigned', async () => {
+    const deviceRes = await request(app)
+      .post('/api/v1/devices')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validPayload());
+    const deviceId = deviceRes.body.device.id;
+
+    const unassigned = await request(app).get('/api/v1/devices').set('Authorization', `Bearer ${token}`);
+    expect(unassigned.body.devices[0].plant).toBeNull();
+
+    const plant = await prisma.plant.create({ data: { name: 'Devices List Test Plant', userId } });
+    await request(app)
+      .post(`/api/v1/devices/${deviceId}/assign`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ plantId: plant.id });
+
+    const assigned = await request(app).get('/api/v1/devices').set('Authorization', `Bearer ${token}`);
+    expect(assigned.body.devices[0].plant).toEqual({ id: plant.id, name: 'Devices List Test Plant' });
+
+    await prisma.plant.deleteMany({ where: { id: plant.id } });
+  });
+});
+
+describe('GET /api/v1/devices/:id', () => {
+  it('returns 401 without a token', async () => {
+    const res = await request(app).get(`/api/v1/devices/${randomUUID()}`);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 for a nonexistent device', async () => {
+    const res = await request(app)
+      .get(`/api/v1/devices/${randomUUID()}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 for another user's device (not 403)", async () => {
+    const deviceRes = await request(app)
+      .post('/api/v1/devices')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validPayload());
+
+    const { token: otherToken } = await createTestUserAndToken();
+    const res = await request(app)
+      .get(`/api/v1/devices/${deviceRes.body.device.id}`)
+      .set('Authorization', `Bearer ${otherToken}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns the device with plant: null when unassigned, never credentialHash', async () => {
+    const deviceRes = await request(app)
+      .post('/api/v1/devices')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validPayload());
+
+    const res = await request(app)
+      .get(`/api/v1/devices/${deviceRes.body.device.id}`)
+      .set('Authorization', `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.device.id).toBe(deviceRes.body.device.id);
+    expect(res.body.device.plant).toBeNull();
+    expect(res.body.device.credentialHash).toBeUndefined();
+  });
+});
+
+describe('PATCH /api/v1/devices/:id -- unassign', () => {
+  let deviceId: string;
+  let plantId: string;
+
+  beforeEach(async () => {
+    const plant = await prisma.plant.create({ data: { name: 'Unassign Test Plant', userId } });
+    plantId = plant.id;
+
+    const deviceRes = await request(app)
+      .post('/api/v1/devices')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validPayload());
+    deviceId = deviceRes.body.device.id;
+
+    await request(app)
+      .post(`/api/v1/devices/${deviceId}/assign`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ plantId });
+  });
+
+  afterEach(async () => {
+    await prisma.plant.deleteMany({ where: { id: plantId } });
+  });
+
+  it('clears plantId when passed explicit null', async () => {
+    const res = await request(app)
+      .patch(`/api/v1/devices/${deviceId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ plantId: null });
+
+    expect(res.status).toBe(200);
+    expect(res.body.plantId).toBeNull();
+
+    const stored = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
+    expect(stored.plantId).toBeNull();
+  });
+
+  // Security-relevant: this generic config endpoint must never let a
+  // caller assign a device to an arbitrary plant (that path -- and its
+  // ownership check on the target plant -- belongs exclusively to
+  // POST /devices/:id/assign). Only the literal value null is accepted.
+  it('rejects a non-null plantId with a validation error, leaving the assignment untouched', async () => {
+    const otherPlant = await prisma.plant.create({ data: { name: 'Other Plant', userId } });
+
+    const res = await request(app)
+      .patch(`/api/v1/devices/${deviceId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ plantId: otherPlant.id });
+
+    expect(res.status).toBe(400);
+
+    const stored = await prisma.device.findUniqueOrThrow({ where: { id: deviceId } });
+    expect(stored.plantId).toBe(plantId);
+
+    await prisma.plant.deleteMany({ where: { id: otherPlant.id } });
+  });
+});

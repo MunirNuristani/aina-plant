@@ -8,15 +8,16 @@ export function DeviceStatusBadge({ device }: { device: Device | undefined }) {
   const lastSeenAt = device?.lastSeenAt;
 
   return (
-    <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest">
-      {/* Status color lives on the dot only — text stays neutral ink, since
-          Golden Pollen (warning) fails WCAG text contrast outright as text. */}
-      <span className="flex items-center gap-1.5 text-ink">
+    <div className="flex items-center gap-2 uppercase tracking-[var(--tracking-label)] [font:var(--text-label)]">
+      {/* Status color lives on the dot only -- text stays neutral ink,
+          since Golden Pollen (warning) fails WCAG text contrast outright
+          as text. */}
+      <span className="flex items-center gap-1.5 text-text-primary">
         <span className={`h-1.5 w-1.5 rounded-full ${copy.dotClass}`} aria-hidden="true" />
         {copy.label}
       </span>
       {lastSeenAt ? (
-        <span className="normal-case tracking-normal text-ink-muted">
+        <span className="normal-case tracking-normal text-text-muted">
           &middot; Last reading {formatRelativeTime(lastSeenAt)}
         </span>
       ) : null}

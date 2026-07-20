@@ -9,6 +9,8 @@ import {
 import {
   assignDeviceToPlant,
   authenticateDevice,
+  getDeviceById,
+  listDevices,
   registerDevice,
   rotateDeviceCredential,
   updateDeviceConfig,
@@ -29,6 +31,24 @@ devicesRouter.post('/auth', async (req, res) => {
   }
 
   const device = await authenticateDevice(parsed.data.identifier, parsed.data.credential);
+  res.status(200).json({ device });
+});
+
+devicesRouter.get('/', userAuthMiddleware, async (req, res) => {
+  if (!req.user) {
+    throw new UnauthorizedError('Authentication required');
+  }
+
+  const devices = await listDevices(req.user.id);
+  res.status(200).json({ devices });
+});
+
+devicesRouter.get('/:id', userAuthMiddleware, async (req, res) => {
+  if (!req.user) {
+    throw new UnauthorizedError('Authentication required');
+  }
+
+  const device = await getDeviceById(req.params.id, req.user.id);
   res.status(200).json({ device });
 });
 

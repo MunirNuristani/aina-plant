@@ -35,6 +35,16 @@ export const MOISTURE_LEVEL_COPY: Record<MoistureLevel, { label: string; dotClas
   "needs-water": { label: "Needs water", dotClass: "bg-error" },
 };
 
+// Maps this app's real moisture classification onto the AINA Design
+// System's StatusPill vocabulary (healthy/watch/critical) -- shared by
+// PlantCard and the plant detail header, both of which show a StatusPill
+// grounded in an actual reading rather than fabricated data.
+export const MOISTURE_LEVEL_TO_PILL_STATUS: Record<MoistureLevel, "healthy" | "watch" | "critical"> = {
+  healthy: "healthy",
+  dry: "watch",
+  "needs-water": "critical",
+};
+
 // No aggregation/downsampling is performed anywhere in this module — every
 // point plotted is a real reading, never a bucket average. The backend caps
 // `GET /readings` at limit=1000 (see lib/plants.ts's getReadingHistory);
