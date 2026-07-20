@@ -1,7 +1,9 @@
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { SettingsPreferences } from "@/components/settings-preferences";
 import { getDevices } from "@/lib/devices";
 import { getSessionEmail } from "@/lib/session";
+import { logoutAction } from "@/lib/actions/auth";
 import packageJson from "../../../../package.json";
 
 export default async function SettingsPage() {
@@ -29,6 +31,12 @@ export default async function SettingsPage() {
           </div>
         </div>
       </Card>
+
+      <form action={logoutAction}>
+        <Button type="submit" variant="ghost" className="w-full">
+          Sign out
+        </Button>
+      </form>
     </div>
   );
 }

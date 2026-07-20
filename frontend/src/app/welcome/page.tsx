@@ -25,7 +25,7 @@ export default function WelcomePage() {
       <div className="flex flex-col items-center gap-2 text-center">
         <span className="font-semibold tracking-tight [font:var(--text-heading-l)]">AINA</span>
         <p className="mt-2 text-text-primary [font:var(--text-heading-m)]">Know your plants better</p>
-        <p className="max-w-[280px] text-text-secondary [font:var(--text-body-m)]">
+        <p className="max-w-70 text-text-secondary [font:var(--text-body-m)]">
           Pair a sensor and get a calm, steady read on how each plant is doing.
         </p>
       </div>

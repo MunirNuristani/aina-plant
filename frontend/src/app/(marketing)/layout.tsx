@@ -1,11 +1,9 @@
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 
-// The wordmark header + dev-info footer, kept for the pages outside the
-// mobile app shell: landing ("/"), login, signup. Screens inside (tabs)
-// use the bottom tab bar instead (see (tabs)/layout.tsx) -- the mockup
-// this app is being restyled to match shows no top wordmark bar on those
-// screens, only each screen's own in-content title.
+// The wordmark header + dev-info footer, kept for the landing page ("/").
+// Login/signup live in (auth) with no header/footer (see (auth)/layout.tsx),
+// and (tabs) screens use the bottom tab bar instead (see (tabs)/layout.tsx).
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-full flex-1 flex-col">
