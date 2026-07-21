@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Newsreader, Manrope, JetBrains_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 // AINA Design System fonts (Newsreader/Manrope/JetBrains Mono), replacing
@@ -51,7 +52,10 @@ export default function RootLayout({
       lang="en"
       className={`${newsreader.variable} ${manrope.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col font-sans">{children}</body>
+      <body className="flex min-h-full flex-col font-sans">
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
