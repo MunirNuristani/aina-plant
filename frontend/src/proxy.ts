@@ -53,6 +53,5 @@ export const config = {
     "/alerts/:path*",
     "/settings",
     "/settings/:path*",
-    "/welcome",
   ],
 };
