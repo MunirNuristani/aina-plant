@@ -6,11 +6,13 @@ import { type FormEvent, useState } from "react";
 import { signupAction } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Eye, EyeOff } from "lucide-react";
 
 export function SignupForm() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -81,15 +83,37 @@ export function SignupForm() {
       />
 
       <div className="flex flex-col gap-1.5">
+        <div className="flex flex-row gap-2 justify-center relative">
         <Input
           id="password"
           label="Password"
-          type="password"
+          type={showPassword ? "text" : "password"}
           autoComplete="new-password"
           value={password}
           onChange={(event) => setPassword(event.target.value)}
           error={fieldErrors.password}
         />
+        <div className="absolute right-2 top-1/2"> 
+          {showPassword ? (
+            <button
+              type="button"
+              onClick={() => setShowPassword(false)}
+              className="text-text-muted [font:var(--text-body-s)]"
+            >
+              <EyeOff />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowPassword(true)}
+              className="text-text-muted [font:var(--text-body-s)]"
+            >
+
+              <Eye />
+            </button>
+          )}
+        </div>
+        </div>
         {!fieldErrors.password ? (
           <p className="text-text-muted [font:var(--text-body-s)]">At least 8 characters.</p>
         ) : null}

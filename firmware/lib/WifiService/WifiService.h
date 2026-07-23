@@ -48,6 +48,17 @@ public:
   // (WL_CONNECTED) -- always reflects live status, not cached state.
   bool isConnected() const;
 
+  // How many connection attempts in a row have failed to reach
+  // WL_CONNECTED, since the last time a connection actually succeeded.
+  // Reset to 0 on the connected transition; incremented each time
+  // update()'s retry branch calls attemptConnect() while not connected.
+  // main.cpp feeds this into ProvisioningTrigger's
+  // shouldEnterProvisioningMode() to decide when an already-provisioned
+  // device should give up on its configured network and fall back into
+  // ProvisioningPortal's setup mode -- see firmware/README.md's "Device
+  // provisioning" section.
+  uint32_t consecutiveFailedAttempts() const;
+
 private:
   const char* ssid_;
   const char* password_;
@@ -58,6 +69,7 @@ private:
   // isConnected(), which always re-checks WiFi.status() directly.
   bool wasConnected_;
   uint32_t lastAttemptMs_;
+  uint32_t consecutiveFailedAttempts_;
 
   void attemptConnect();
 };

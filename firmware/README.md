@@ -53,21 +53,24 @@ These are starting points, not measured values — there's no physical
 sensor available to tune them against yet. All three are constructor
 parameters, easy to adjust once real hardware is on hand.
 
-### Configuring the pin
+### Configuring the pin(s)
 
 The sensor's pin is **not** hardcoded inside the module — it's passed in
-by whatever code constructs a `SoilMoistureSensor`. In `src/main.cpp`,
-that's the single `SOIL_SENSOR_PIN` constant at the top of the file:
+by whatever code constructs a `SoilMoistureSensor`. This board wires up
+4 of them (one per plant, see "Device provisioning" below for the
+4-channel architecture), each on its own pin, listed in one place in
+`src/main.cpp`:
 
 ```cpp
-constexpr uint8_t SOIL_SENSOR_PIN = 34;
-SoilMoistureSensor soilSensor(SOIL_SENSOR_PIN, /* sampleCount= */ 10, /* sampleDelayMs= */ 15);
+constexpr uint8_t SOIL_SENSOR_PINS[DeviceConfigStore::CHANNEL_COUNT] = {34, 32, 33, 35};
 ```
 
-Change that one constant to rewire the sensor to a different pin —
-nothing inside `SoilMoistureSensor` itself needs to change. GPIO34 was
-chosen because it's one of the ESP32's ADC1 pins, which (unlike ADC2)
-stay usable once Wi-Fi is active.
+Change these to rewire a sensor to a different pin — nothing inside
+`SoilMoistureSensor` itself needs to change; it's already designed to be
+instantiated once per pin (see `Channel`'s constructor in `main.cpp`).
+GPIO32/33/34/35 were chosen because they're all ADC1 pins, which (unlike
+ADC2) stay usable once Wi-Fi is active. Channel 1 keeps GPIO34, the pin
+the original single-sensor build already used.
 
 ### Failure detection — never invented data
 
@@ -179,9 +182,8 @@ masked before logging (`maskSsid()` in `WifiService.cpp`, keeps only the
 first/last character, e.g. `A********7`) so Serial output never reveals the
 full configured credentials.
 
-`main.cpp` holds `WIFI_SSID`/`WIFI_PASSWORD` as placeholder constants —
-replace them with real values before flashing, but never commit real
-credentials to this file (it's tracked in git).
+`main.cpp` no longer holds Wi-Fi credentials as compile-time constants at
+all — see "Device provisioning" below for where they actually come from.
 
 ### Why no native tests
 
@@ -190,6 +192,171 @@ so it's excluded from the `native` PlatformIO environment (see
 `platformio.ini`'s `lib_ignore`) and can only be verified on real hardware.
 The one piece of non-trivial logic it relies on — the retry-delay timing —
 is factored into `RetryTimer`, which *is* natively unit-tested.
+
+### `consecutiveFailedAttempts()`
+
+Every time `update()`'s retry branch calls `attemptConnect()` while not
+connected, a counter increments; it resets to 0 on the connected
+transition. This is the signal an already-provisioned device uses to
+decide it should give up on its configured network and fall back into
+setup mode — see "Device provisioning" below.
+
+## Device provisioning
+
+This board is exactly 4 soil-moisture channels (see `Channel`/`channels`
+in `main.cpp`) sharing one Wi-Fi radio and one LCD — never a generic
+N-sensor abstraction, and no other sensor types are planned. Wi-Fi
+credentials (shared by all 4 channels) and each channel's server-assigned
+`deviceId`/`deviceKey` are never compile-time constants and never require
+a reflash to change. All of it is loaded at boot from `DeviceConfigStore`
+(flash/NVS-backed) and, whenever it's missing or no longer works,
+(re)provisioned over `ProvisioningPortal`'s SoftAP setup mode instead.
+
+### Why SoftAP instead of Bluetooth
+
+The obvious alternative — configuring Wi-Fi over BLE from the phone's
+browser (Web Bluetooth) — doesn't exist on iOS at all (every browser
+there, including Chrome, is built on WebKit, which doesn't implement
+`navigator.bluetooth`). Since the frontend is a mobile-first PWA, that
+would leave iPhone users with no path. SoftAP works identically on every
+phone/OS/browser: the device briefly hosts its own open Wi-Fi network,
+the phone joins it like any other network, and a plain web form does the
+rest — the same pattern smart plugs and similar hardware use.
+
+### Why the setup link is a real link/QR, not a fetch() call
+
+The frontend is served over HTTPS. A page served over HTTPS cannot
+`fetch()`/XHR a plain-`http://` URL — browsers block that as mixed
+content. A genuine **top-level navigation** to a plain-`http://` URL
+(clicking a real `<a href="http://...">`, or scanning a QR code encoding
+one) is *not* blocked, since it isn't a subresource load. So after
+registering a board's 4 channels (or rotating one channel's credential),
+the frontend hands the user a tappable link/QR of the form
+`http://192.168.4.1/setup?boardIdentifier=...&deviceId1=...&deviceKey1=...&deviceId2=...&deviceKey2=...&deviceId3=...&deviceKey3=...&deviceId4=...&deviceKey4=...`
+(built by `frontend/src/lib/device-setup-url.ts`, with 1 to 4 channel
+slots depending on whether it's initial registration or a single
+channel's rotation) to open *after* joining the device's temporary AP,
+rather than trying to call that URL from within the page itself.
+
+### Why one `BOARD_IDENTIFIER` with derived `-chN` suffixes, not 4 independent constants
+
+`main.cpp`'s `BOARD_IDENTIFIER` (e.g. `"esp32-quad-01"`) is fixed per
+physical unit at flash time, printed as that unit's QR label, and is what
+the frontend derives all 4 channels' identifiers from
+(`"esp32-quad-01-ch1"` .. `"-ch4"`), matching what the frontend's
+`board-pairing-flow.tsx` registers each channel's `Device.identifier` as
+in the backend (`@unique`). One base identifier with derived suffixes,
+computed once in `setup()` via `snprintf`, is the single source of truth
+— 4 hand-written compile-time constants could drift apart (a typo in one
+channel's constant silently mismatches the backend). This convention is a
+cross-repo contract with no shared constant enforcing it: keep
+`main.cpp`'s `"%s-ch%u"` format and `board-pairing-flow.tsx`'s
+`` `${boardIdentifier}-ch${n}` `` in lockstep if either ever changes.
+
+### What's in NVS vs. what stays a flash-time constant
+
+`DeviceConfigStore` persists `wifiSsid`/`wifiPassword` (shared by all 4
+channels — one radio) and each channel's `deviceId`/`deviceKey` (4
+independent pairs) — the things that can legitimately change after a
+unit ships. `BOARD_IDENTIFIER` deliberately stays a compile-time constant
+(see above) — there's no scenario where it needs to change at runtime.
+
+### Merge, not overwrite: single-channel credential rotation
+
+`DeviceConfigStore::save()` merges into whatever's already stored —
+writing only the fields actually supplied (non-empty), leaving everything
+else in flash untouched. This is what makes single-channel credential
+rotation possible: `device-detail-controls.tsx`'s "Reconfigure Wi-Fi"
+submits just one channel's `deviceId`/`deviceKey` (via
+`ProvisioningPortal`'s form, ssid/password and the other 3 channels
+omitted), and the merge preserves the Wi-Fi credentials and the other 3
+channels' identities rather than forcing the user to re-enter their home
+Wi-Fi password or re-touch 3 unrelated sensors just to rotate one
+channel. A true first-time board registration simply supplies all 10
+fields, which has the same net effect a full overwrite would.
+`ProvisioningPortal::handleSetup()` only requires `ssid` non-empty when
+`DeviceConfigStore::load()` finds no prior config to fall back on — a
+single-channel rotation submission is expected to omit it.
+
+### `ProvisioningPortal`'s `/setup` form
+
+`GET /` and `GET /setup` serve a single self-contained HTML form (a
+`PROGMEM` string literal — no build step, no SPIFFS). Query args from the
+incoming request (`boardIdentifier` plus whichever of `deviceId1..4`/
+`deviceKey1..4` are present, carried over from the frontend's link/QR)
+are read server-side and echoed straight into the form's hidden fields,
+so the user only has to fill in their Wi-Fi network's name and password
+— no client-side JavaScript parses the URL. `POST /setup` validates the
+submitted `boardIdentifier` against the compiled-in `BOARD_IDENTIFIER`
+**before writing anything to `Preferences`** — this is a board-level
+check (all 4 channels on one physical unit share it), and catches being
+on the wrong physical board's AP mid-setup (e.g. a second board's link
+tapped while still joined to the first one's network): on mismatch, it
+responds with an error and does not save or reboot. On a match, it
+builds the merged `Config` (see above) and calls `DeviceConfigStore::save()`
+then `ESP.restart()`.
+
+### Brand-new unit vs. an already-provisioned board losing connectivity — the same code path
+
+Both converge on the identical `main.cpp::enterProvisioningMode()`, just
+triggered from different call sites:
+
+- **Brand-new unit** (or one explicitly cleared): `setup()` calls
+  `DeviceConfigStore::load()`, which returns false when any of the 10
+  stored fields (`wifiSsid`, `wifiPassword`, 4×`deviceId`, 4×`deviceKey`)
+  is missing, and enters provisioning mode immediately — skipping
+  `wifiService.begin()` entirely, since there's nothing to connect with
+  yet.
+- **Already-provisioned board that can no longer reach its network**
+  (moved, router changed, password rotated): `loop()` checks
+  `shouldEnterProvisioningMode(wifiService.consecutiveFailedAttempts(),
+  WIFI_FAILURE_THRESHOLD_FOR_PROVISIONING)` (`lib/ProvisioningTrigger/`)
+  every iteration, and enters the same mode once that threshold trips —
+  board-level (one shared Wi-Fi connection for all 4 channels), no
+  button, no manual reset required. All 4 channels stop reporting
+  simultaneously when this trips, and resume together once reconnected.
+
+Going the other direction — provisioning back to normal operation —
+always goes through `ESP.restart()` after a successful `/setup`
+submission, so `setup()` re-runs from a clean boot with `load()` now
+succeeding, rather than trying to reconstruct `WifiService`/each
+channel's `ReadingSubmitter` live with new credentials.
+
+### The AP is open, by design
+
+`ProvisioningPortal`'s SoftAP has no password and stays up until a
+successful submission or a manual power cycle. This is an accepted
+trade-off for a personal plant-monitoring device with nothing sensitive
+beyond revocable device credentials (rotatable via
+`POST /devices/:id/rotate-credential` per channel if ever suspected
+exposed) — the same spirit as `ReadingSubmitter`'s `setInsecure()`
+trade-off above. A future iteration could add a fixed or QR-printed AP
+passphrase if that stops being acceptable.
+
+### Sequential channel processing, not concurrent
+
+`main.cpp`'s `loop()` runs `runChannelCycle()` for all 4 channels, one
+after another, within a single pass — not truly concurrently. Since each
+channel's cycle can make one blocking, bounded HTTP submission (see
+`ReadingSubmitter`'s 15-second internal timeout), a worst-case pass (all
+4 channels blocking at once) takes meaningfully longer than the original
+single-sensor build's cycle did. Accepted trade-off at this board's scale
+(4 channels, not dozens) — each channel's `ReadingRetrier` still tracks
+its own in-flight retry independently (see `Channel`'s per-channel
+`submitter`/`retrier` in `main.cpp`), so one channel's pending retry
+never blocks the other three's fresh reads; it's only the sequential
+ordering within one pass that's shared.
+
+### Why no native tests (`DeviceConfigStore`, `ProvisioningPortal`)
+
+Both depend on `Preferences.h`/`WiFi.h`/`WebServer.h`/`DNSServer.h`, so
+they're excluded from the `native` PlatformIO environment (see
+`platformio.ini`'s `lib_ignore`) and can only be verified on real
+hardware — same reasoning as `WifiService`/`ReadingSubmitter`. The one
+piece of non-trivial decision logic either of them depends on — the
+failure-threshold check — is factored into `lib/ProvisioningTrigger/`,
+which *is* natively unit-tested (`test/test_provisioning_trigger/`),
+mirroring `RetryTimer`'s split.
 
 ## Firmware reading payload
 
@@ -334,32 +501,44 @@ and use that port in `API_URL` instead.
 
 ### Testing against the seeded dev device
 
-`main.cpp`'s compiled-in defaults point at the deployed backend and a real
-registered device (see above) — not the local seed fixture. To test
-against a freshly seeded *local* backend instead, temporarily set:
+`main.cpp`'s compiled-in `API_URL` points at the deployed backend, not the
+local seed fixture. To test against a freshly seeded *local* backend
+instead: temporarily set `API_URL` to your machine's LAN address (see
+above), reflash, then provision the device over its setup AP — no other
+source edits needed, since Wi-Fi/device credentials aren't compiled in
+anymore (see "Device provisioning" above):
 
-- `API_URL` to your machine's LAN address (see above), not the deployed URL
-- `DEVICE_IDENTIFIER`/`DEVICE_KEY` to `backend/prisma/seed.ts`'s fixture
-  device (`dev-seed-device-001` /
-  `dev-only-seed-credential-do-not-use-in-production`) — a committed,
-  intentionally-public dev-only credential, already assigned to a seed
-  plant, so a freshly seeded local backend works out of the box
+1. Join the board's `AINA-Setup-esp32-quad-01` network (or whatever
+   `BOARD_IDENTIFIER` you flashed).
+2. Open (or `curl -X POST`) this URL, using `backend/prisma/seed.ts`'s
+   fixture device — `dev-seed-device-001` /
+   `dev-only-seed-credential-do-not-use-in-production`, a committed,
+   intentionally-public dev-only credential already assigned to a seed
+   plant — plus its real `Device.id` (a UUID, looked up via the command
+   below, **not** the identifier string — see "deviceId vs. the
+   X-Device-Id header" above for why they differ). The seed fixture is a
+   single device, so this only fills channel 1's slot (`deviceId1`/
+   `deviceKey1`) — the other 3 channels stay unprovisioned, which is fine
+   for testing the readings pipeline against one seeded plant:
 
-Only `DEVICE_ID` needs filling in separately:
+   ```bash
+   # Look up the seed device's real Device.id:
+   curl -X POST http://localhost:3000/api/v1/devices/auth \
+     -H 'Content-Type: application/json' \
+     -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
+   ```
 
-```bash
-# After seeding (npm run prisma:seed), look up the seed device's real
-# Device.id (a UUID) — this is what main.cpp's DEVICE_ID constant needs,
-# NOT the identifier string above (see "deviceId vs. the X-Device-Id
-# header" above for why they're different fields):
-curl -X POST http://localhost:3000/api/v1/devices/auth \
-  -H 'Content-Type: application/json' \
-  -d '{"identifier":"dev-seed-device-001","credential":"dev-only-seed-credential-do-not-use-in-production"}'
-```
+   ```bash
+   curl -X POST http://192.168.4.1/setup \
+     --data-urlencode "ssid=<your network>" \
+     --data-urlencode "password=<your password>" \
+     --data-urlencode "boardIdentifier=esp32-quad-01" \
+     --data-urlencode "deviceId1=<the UUID from above>" \
+     --data-urlencode "deviceKey1=dev-only-seed-credential-do-not-use-in-production"
+   ```
 
-Don't commit that swap — revert `API_URL`/`DEVICE_IDENTIFIER`/`DEVICE_KEY`
-back afterward, same as you would for a temporary `WIFI_SSID`/
-`WIFI_PASSWORD` edit.
+Revert `API_URL` back to the deployed URL afterward, same as you would for
+a temporary local-backend edit.
 
 ### Verifying storage in PostgreSQL
 
@@ -467,7 +646,7 @@ blocking *during* one.
 ```
 firmware/
   platformio.ini                    PlatformIO project + board/test environments
-  src/main.cpp                      Entry point (setup/loop) — demonstrates usage
+  src/main.cpp                      Entry point (setup/loop) — Channel struct + runChannelCycle() drive the 4 sensor channels
   lib/SoilMoistureSensor/            Reads + filters the raw sensor value (needs Arduino/hardware)
   lib/MoistureCalibration/           Converts raw → percent (pure logic, natively testable)
   lib/RetryTimer/                    Overflow-safe "should retry now" timing (pure logic, natively testable)
@@ -478,10 +657,14 @@ firmware/
   lib/ReadingSubmitOutcome/          Classifies an HTTP response into success/duplicate/retryable (pure logic, natively testable)
   lib/ReadingSubmitter/              POSTs a reading to the backend with device auth headers (needs Arduino/hardware)
   lib/ReadingRetrier/                Retry policy (classify, controlled delay, same reading ID, bounded attempts) on top of ReadingSubmitter (needs Arduino/hardware)
+  lib/DeviceConfigStore/             Persists Wi-Fi/device credentials to flash (NVS via Preferences) (needs Arduino/hardware)
+  lib/ProvisioningTrigger/           "Give up and re-provision?" threshold check (pure logic, natively testable)
+  lib/ProvisioningPortal/            SoftAP + self-served /setup form for (re)provisioning (needs Arduino/hardware)
   test/test_moisture_calibration/    Unit tests for MoistureCalibration (`pio test -e native`)
   test/test_retry_timer/             Unit tests for RetryTimer (`pio test -e native`)
   test/test_uuid_v4/                 Unit tests for UuidV4 (`pio test -e native`)
   test/test_iso8601/                 Unit tests for Iso8601 (`pio test -e native`)
   test/test_firmware_reading/        Unit tests for FirmwareReading (`pio test -e native`)
   test/test_reading_submit_outcome/  Unit tests for ReadingSubmitOutcome, including retryability (`pio test -e native`)
+  test/test_provisioning_trigger/    Unit tests for ProvisioningTrigger (`pio test -e native`)
 ```

@@ -42,6 +42,28 @@ export async function registerDeviceAction(input: RegisterDeviceInput): Promise<
   return { ok: true, device: data.device, credential: data.credential };
 }
 
+export type RotateDeviceCredentialResult =
+  | { ok: true; device: Device; credential: string }
+  | { ok: false; error: string };
+
+// Issues a fresh device credential without touching the device's id,
+// identifier, or plant assignment -- the mechanism for "this
+// already-registered device just needs new Wi-Fi" (moved, router
+// changed), since the original credential is only ever shown once and
+// isn't stored in plaintext anywhere to hand out again. See
+// device-detail-controls.tsx's "Reconfigure Wi-Fi" button.
+export async function rotateDeviceCredentialAction(deviceId: string): Promise<RotateDeviceCredentialResult> {
+  const res = await apiFetch(`/devices/${deviceId}/rotate-credential`, { method: "POST" });
+
+  if (!res.ok) {
+    const body: { error?: ApiError } = await res.json().catch(() => ({}));
+    return { ok: false, error: body.error?.message ?? `Failed to rotate credential (${res.status})` };
+  }
+
+  const data: { device: Device; credential: string } = await res.json();
+  return { ok: true, device: data.device, credential: data.credential };
+}
+
 export type SimpleActionResult = { ok: true } | { ok: false; error: string };
 
 async function parseSimpleErrorResult(res: Response, fallbackVerb: string): Promise<SimpleActionResult> {

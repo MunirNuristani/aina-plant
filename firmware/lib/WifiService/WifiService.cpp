@@ -7,7 +7,8 @@ WifiService::WifiService(const char* ssid, const char* password, uint32_t retryD
       password_(password),
       retryDelayMs_(retryDelayMs),
       wasConnected_(false),
-      lastAttemptMs_(0) {}
+      lastAttemptMs_(0),
+      consecutiveFailedAttempts_(0) {}
 
 void WifiService::begin() {
   // Station mode explicitly, rather than relying on the core's default --
@@ -23,6 +24,7 @@ void WifiService::update() {
     Serial.print("[WifiService] connected, IP: ");
     Serial.println(WiFi.localIP());
     wasConnected_ = true;
+    consecutiveFailedAttempts_ = 0;
     return;
   }
 
@@ -36,12 +38,17 @@ void WifiService::update() {
   }
 
   if (!connectedNow && shouldRetryNow(millis(), lastAttemptMs_, retryDelayMs_)) {
+    consecutiveFailedAttempts_++;
     attemptConnect();
   }
 }
 
 bool WifiService::isConnected() const {
   return WiFi.status() == WL_CONNECTED;
+}
+
+uint32_t WifiService::consecutiveFailedAttempts() const {
+  return consecutiveFailedAttempts_;
 }
 
 void WifiService::attemptConnect() {

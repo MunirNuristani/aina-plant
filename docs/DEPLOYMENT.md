@@ -148,13 +148,22 @@ cd backend
 DATABASE_URL="<neon-connection-string>" npx tsx prisma/seed.ts
 ```
 
-Or skip seeding and register a real device directly:
+Or skip seeding and register a real board's 4 channels directly (a real
+board is 4 independent `Device` rows, one per sensor — see
+`firmware/README.md`'s "Device provisioning" section — so this is 4
+calls, one per `-ch1`..`-ch4` suffix, not one):
 
 ```bash
-curl -X POST https://<your-app>.onrender.com/api/v1/devices \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"My ESP32","identifier":"esp32-001"}'
+for i in 1 2 3 4; do
+  curl -X POST https://<your-app>.onrender.com/api/v1/devices \
+    -H 'Content-Type: application/json' \
+    -d "{\"name\":\"My board — Sensor $i\",\"identifier\":\"esp32-quad-001-ch$i\"}"
+done
 ```
+
+Doing this through the frontend's `/devices/pair-board` flow instead is
+usually easier — it also handles the per-channel plant assignment and
+hands back the combined Wi-Fi/credential setup link in one step.
 
 Update the `baseUrl` collection variable in
 `docs/aina-plant-backend.postman_collection.json` to your Render URL and
@@ -197,14 +206,19 @@ constexpr const char* API_URL = "http://YOUR_LAN_IP:3000/api/v1/readings";
 constexpr const char* API_URL = "https://<your-app>.onrender.com/api/v1/readings";
 ```
 
-And swap `DEVICE_IDENTIFIER`/`DEVICE_KEY` from the seed fixture values to the
-credential you got back from registering a real device in Part 3 — the seed
-device is a shared dev-only fixture, not meant for a real deployed device.
+`BOARD_IDENTIFIER` stays compile-time (see `firmware/README.md`'s "Device
+provisioning" section) — set it to a real, unique identifier per physical
+board before flashing, not the seed fixture's `dev-seed-device-001`,
+which is a shared dev-only value for a single test channel.
 
-I haven't made these firmware edits yet — say the word when you want me to
-wire this up for real, since it also means updating
-`firmware/README.md`'s "Local network address setup" section, which
-currently documents the LAN-only setup as the only option.
+Each of the board's 4 channels' server-assigned `deviceId`/`deviceKey`
+are **not** compiled in at all — after registering a real board's 4
+channels in Part 3, get their `deviceId`/credentials onto the physical
+unit via `ProvisioningPortal`'s setup AP instead of editing firmware
+source: join `AINA-Setup-<your board identifier>`, then open (or scan the
+QR for) the combined setup link `/devices/pair-board` shows right after
+registering all 4 channels. See `firmware/README.md`'s "Device
+provisioning" section for how that works.
 
 ## Part 5: Future deploys
 

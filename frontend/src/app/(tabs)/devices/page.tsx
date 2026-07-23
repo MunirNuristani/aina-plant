@@ -12,7 +12,7 @@ export default async function DevicesPage() {
     <div className="flex w-full flex-1 flex-col gap-4 px-4 pt-6 pb-4">
       <div className="mb-1 flex items-end justify-between">
         <h1 className="text-text-primary [font:var(--text-display-m)]">Devices</h1>
-        <Link href="/devices/pair">
+        <Link href="/devices/pair-board">
           <IconButton icon={<Plus size={18} />} label="Add device" variant="primary" />
         </Link>
       </div>
@@ -26,7 +26,7 @@ export default async function DevicesPage() {
           <p className="max-w-[260px] text-text-muted [font:var(--text-body-m)]">
             Devices you pair will appear here.
           </p>
-          <Link href="/devices/pair">
+          <Link href="/devices/pair-board">
             <Button variant="primary">Add a device</Button>
           </Link>
         </div>

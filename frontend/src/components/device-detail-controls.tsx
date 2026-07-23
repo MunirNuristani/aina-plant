@@ -2,12 +2,33 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { assignDeviceAction, setDeviceEnabledAction, unassignDeviceAction } from "@/lib/actions/devices";
+import {
+  assignDeviceAction,
+  rotateDeviceCredentialAction,
+  setDeviceEnabledAction,
+  unassignDeviceAction,
+} from "@/lib/actions/devices";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { BoardSetupLink } from "@/components/board-setup-link";
 import type { DeviceListItem, Plant } from "@/lib/types";
+
+// A channel's identifier is "<boardIdentifier>-chN" (see
+// board-pairing-flow.tsx / firmware's BOARD_IDENTIFIER comment). Falls
+// back to treating the whole identifier as the board identifier and slot
+// 1 for a device registered before boards existed (or any identifier
+// that doesn't match the "-chN" convention) -- ProvisioningPortal's
+// mismatch guard only ever compares against this same value, so a
+// same-shaped fallback on both sides keeps rotation working either way.
+function boardIdentifierAndSlot(identifier: string): { boardIdentifier: string; slot: number } {
+  const match = identifier.match(/^(.*)-ch([1-4])$/);
+  if (!match) {
+    return { boardIdentifier: identifier, slot: 1 };
+  }
+  return { boardIdentifier: match[1], slot: Number(match[2]) };
+}
 
 export function DeviceDetailControls({
   device,
@@ -19,6 +40,8 @@ export function DeviceDetailControls({
   const router = useRouter();
   const [enabled, setEnabled] = useState(device.enabled);
   const [reassignOpen, setReassignOpen] = useState(false);
+  const [reconfigureCredential, setReconfigureCredential] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,6 +85,24 @@ export function DeviceDetailControls({
     }
   }
 
+  // Issues a fresh device credential and shows the same setup link/QR
+  // used right after initial registration -- for a device that's already
+  // paired but just needs new Wi-Fi (moved, router changed). The
+  // original credential was only ever shown once and isn't stored in
+  // plaintext, so this is the only way to get a working setup link for
+  // an existing device.
+  async function handleReconfigureWifi() {
+    setRotating(true);
+    setError(null);
+    const result = await rotateDeviceCredentialAction(device.id);
+    setRotating(false);
+    if (result.ok) {
+      setReconfigureCredential(result.credential);
+    } else {
+      setError(result.error);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
       <Card>
@@ -76,6 +117,10 @@ export function DeviceDetailControls({
 
       <Button variant="secondary" onClick={() => setReassignOpen(true)} disabled={busy}>
         {device.plant ? "Reassign to another plant" : "Assign to a plant"}
+      </Button>
+
+      <Button variant="secondary" onClick={handleReconfigureWifi} disabled={busy || rotating}>
+        {rotating ? "Preparing setup link…" : "Reconfigure Wi-Fi"}
       </Button>
 
       {device.plant ? (
@@ -118,6 +163,29 @@ export function DeviceDetailControls({
             ))}
           </div>
         )}
+      </Dialog>
+
+      <Dialog
+        open={reconfigureCredential !== null}
+        title="Reconfigure Wi-Fi"
+        onClose={() => setReconfigureCredential(null)}
+        footer={
+          <Button variant="ghost" onClick={() => setReconfigureCredential(null)}>
+            Close
+          </Button>
+        }
+      >
+        {reconfigureCredential
+          ? (() => {
+              const { boardIdentifier, slot } = boardIdentifierAndSlot(device.identifier);
+              return (
+                <BoardSetupLink
+                  boardIdentifier={boardIdentifier}
+                  slots={[{ slot, deviceId: device.id, deviceKey: reconfigureCredential }]}
+                />
+              );
+            })()
+          : null}
       </Dialog>
     </div>
   );

@@ -53,8 +53,9 @@ export function AddPlantForm() {
 
       if (result.ok) {
         // Matches the mockup's onContinueAddPlant: land on the pairing
-        // flow next, pre-targeted at the plant just created.
-        router.push(`/devices/pair?plantId=${result.plant.id}`);
+        // flow next, pre-targeted at the plant just created (sensor 1's
+        // slot, since a board registers all 4 sensors at once).
+        router.push(`/devices/pair-board?plantId=${result.plant.id}`);
       } else {
         setFieldErrors(result.fieldErrors);
         if (result.formError) {

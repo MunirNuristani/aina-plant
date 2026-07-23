@@ -6,11 +6,14 @@ import { type FormEvent, useState } from "react";
 import { loginAction } from "@/lib/actions/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Eye, EyeOff } from "lucide-react";
+
 
 export function LoginForm() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
@@ -56,15 +59,42 @@ export function LoginForm() {
         error={fieldErrors.email}
       />
 
-      <Input
-        id="password"
-        label="Password"
-        type="password"
-        autoComplete="current-password"
-        value={password}
-        onChange={(event) => setPassword(event.target.value)}
-        error={fieldErrors.password}
-      />
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-row gap-2 justify-center relative">
+          <Input
+            id="password"
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            autoComplete="current-password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            error={fieldErrors.password}
+          />
+          <div className="absolute right-2 top-1/2">
+            {showPassword ? (
+              <button
+                type="button"
+                onClick={() => setShowPassword(false)}
+                className="text-text-muted [font:var(--text-body-s)]"
+              >
+                <EyeOff />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowPassword(true)}
+                className="text-text-muted [font:var(--text-body-s)]"
+              >
+
+                <Eye />
+              </button>
+            )}
+          </div>
+        </div>
+        {!fieldErrors.password ? (
+          <p className="text-text-muted [font:var(--text-body-s)]">At least 8 characters.</p>
+        ) : null}
+      </div>
 
       {formError ? (
         <p className="rounded-s bg-status-critical-bg px-3 py-2 text-status-critical-fg [font:var(--text-body-s)]">
